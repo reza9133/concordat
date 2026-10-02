@@ -12,46 +12,57 @@ export const CONTRACT_ADDRESS = (
   import.meta.env.VITE_CONTRACT_ADDRESS || '0x7F0b950E72E9674D5712c13BAe05f4FbA2250Cb5'
 ) as `0x${string}`;
 
-/** GenLayer JS client connected to studionet */
-export const client = createClient({
-  chain: studionet,
-});
+/**
+ * Read-only client (no account needed).
+ * Write operations create a fresh client with the sender's account via
+ * createClient({ chain: studionet, account: senderAddress }) so the
+ * injected wallet provider signs the transaction.
+ */
+const readClient = createClient({ chain: studionet });
+
+/** Create a write-capable client for a specific sender address */
+function writeClient(senderAddress: `0x${string}`) {
+  return createClient({
+    chain: studionet,
+    account: senderAddress,
+  });
+}
 
 // ---- Hall (read) methods ----
 
 /** Fetch the hall configuration */
 export async function readGetConfig(): Promise<HallConfig> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_config',
     args: [],
   });
-  return result as HallConfig;
+  return result as unknown as HallConfig;
 }
 
 /** Fetch all rules from the hall */
 export async function readGetRules(): Promise<Rule[]> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_rules',
     args: [],
   });
-  return result as Rule[];
+  return result as unknown as Rule[];
 }
 
 /** Fetch standing for a member address */
 export async function readGetStanding(address: string): Promise<Standing> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_standing',
     args: [address],
   });
-  return result as Standing;
+  return result as unknown as Standing;
 }
 
 /** Fetch a case registry entry by its address */
 export async function readGetCase(caseAddress: string): Promise<unknown> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_case',
     args: [caseAddress],
@@ -61,22 +72,22 @@ export async function readGetCase(caseAddress: string): Promise<unknown> {
 
 /** Fetch paginated list of case addresses */
 export async function readGetCases(offset: number, limit: number): Promise<string[]> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_cases',
     args: [offset, limit],
   });
-  return result as string[];
+  return result as unknown as string[];
 }
 
 /** Fetch total number of cases */
 export async function readGetCaseCount(): Promise<number> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_case_count',
     args: [],
   });
-  return result as number;
+  return result as unknown as number;
 }
 
 /** Fetch all cases with total count */
@@ -94,30 +105,32 @@ export async function readGetCasesWithCount(offset = 0, limit = 20): Promise<Cas
 export async function writeAddRule(
   senderAddress: `0x${string}`,
   title: string,
-  text: string
+  text: string,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'add_rule',
     args: [title, text],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
 /** Retire an existing rule — owner only */
 export async function writeRetireRule(
   senderAddress: `0x${string}`,
-  ruleNumber: number
+  ruleNumber: number,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'retire_rule',
     args: [ruleNumber],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
@@ -125,15 +138,16 @@ export async function writeRetireRule(
 export async function writeForgivePoints(
   senderAddress: `0x${string}`,
   member: string,
-  points: number
+  points: number,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'forgive_points',
     args: [member, points],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
@@ -142,15 +156,16 @@ export async function writeFileCase(
   senderAddress: `0x${string}`,
   accused: string,
   ruleNumber: number,
-  complaintUrl: string
+  complaintUrl: string,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'file_case',
     args: [accused, ruleNumber, complaintUrl],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
@@ -158,22 +173,22 @@ export async function writeFileCase(
 
 /** Fetch full case status from a ConcordatCase contract */
 export async function readCaseStatus(caseAddress: `0x${string}`): Promise<CaseStatus> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: caseAddress,
     functionName: 'get_status',
     args: [],
   });
-  return result as CaseStatus;
+  return result as unknown as CaseStatus;
 }
 
 /** Check if a ruling can be requested for a case */
 export async function readCanRequestRuling(caseAddress: `0x${string}`): Promise<boolean> {
-  const result = await client.readContract({
+  const result = await readClient.readContract({
     address: caseAddress,
     functionName: 'can_request_ruling',
     args: [],
   });
-  return result as boolean;
+  return result as unknown as boolean;
 }
 
 // ---- Case contract (write) methods ----
@@ -182,30 +197,32 @@ export async function readCanRequestRuling(caseAddress: `0x${string}`): Promise<
 export async function writeCaseSubmitDefense(
   senderAddress: `0x${string}`,
   caseAddress: `0x${string}`,
-  url: string
+  url: string,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: caseAddress,
     functionName: 'submit_defense',
     args: [url],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
-/** Request an AI ruling on a case */
+/** Request an AI ruling on a case — anyone can trigger */
 export async function writeCaseRequestRuling(
   senderAddress: `0x${string}`,
-  caseAddress: `0x${string}`
+  caseAddress: `0x${string}`,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: caseAddress,
     functionName: 'request_ruling',
     args: [],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
@@ -213,49 +230,54 @@ export async function writeCaseRequestRuling(
 export async function writeCaseAppeal(
   senderAddress: `0x${string}`,
   caseAddress: `0x${string}`,
-  groundsUrl: string
+  groundsUrl: string,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: caseAddress,
     functionName: 'appeal',
     args: [groundsUrl],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
 /** Finalize a case after the appeal window passes */
 export async function writeCaseFinalize(
   senderAddress: `0x${string}`,
-  caseAddress: `0x${string}`
+  caseAddress: `0x${string}`,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: caseAddress,
     functionName: 'finalize',
     args: [],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
-/** Abandon a stuck appeal */
+/** Abandon a stuck appeal — anyone can call after timeout */
 export async function writeCaseAbandonAppeal(
   senderAddress: `0x${string}`,
-  caseAddress: `0x${string}`
+  caseAddress: `0x${string}`,
 ): Promise<string> {
-  const txHash = await client.writeContract({
+  const wc = writeClient(senderAddress);
+  const txHash = await wc.writeContract({
     address: caseAddress,
     functionName: 'abandon_appeal',
     args: [],
-    account: senderAddress,
-  });
-  await client.waitForTransactionReceipt({ hash: txHash });
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  await wc.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
 
-/** Helper: format seconds into human-readable string */
+// ---- Utility helpers ----
+
+/** Format seconds into a human-readable duration string */
 export function formatSeconds(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
@@ -263,13 +285,13 @@ export function formatSeconds(seconds: number): string {
   return `${Math.round(seconds / 86400)}d`;
 }
 
-/** Helper: truncate an Ethereum address */
+/** Truncate an Ethereum address for display */
 export function truncateAddress(address: string, chars = 6): string {
   if (!address) return '';
   return `${address.slice(0, chars + 2)}…${address.slice(-chars)}`;
 }
 
-/** Helper: map generic errors to user-friendly messages */
+/** Map raw errors to user-friendly messages */
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
