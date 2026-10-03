@@ -5,7 +5,16 @@
 
 import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
-import type { HallConfig, Rule, Standing, CaseStatus, CasesResult } from '../types';
+import type {
+  HallConfig,
+  Rule,
+  Standing,
+  CaseStatus,
+  CasesResult,
+  RawStanding,
+  RawCaseStatus,
+} from '../types';
+import { mapStanding, mapCaseStatus } from './mappers';
 
 /** The deployed ConcordatHall contract address */
 export const CONTRACT_ADDRESS = (
@@ -13,14 +22,15 @@ export const CONTRACT_ADDRESS = (
 ) as `0x${string}`;
 
 /**
- * Read-only client (no account needed).
- * Write operations create a fresh client with the sender's account via
- * createClient({ chain: studionet, account: senderAddress }) so the
- * injected wallet provider signs the transaction.
+ * Read-only client — no account needed for view methods.
  */
 const readClient = createClient({ chain: studionet });
 
-/** Create a write-capable client for a specific sender address */
+/**
+ * Create a write-capable client bound to a specific sender address.
+ * In genlayer-js v1.x, account must be set at client-creation time,
+ * not in the writeContract call params.
+ */
 function writeClient(senderAddress: `0x${string}`) {
   return createClient({
     chain: studionet,
@@ -28,7 +38,42 @@ function writeClient(senderAddress: `0x${string}`) {
   });
 }
 
-// ---- Hall (read) methods ----
+// ---------------------------------------------------------------------------
+// Transaction result check
+// ---------------------------------------------------------------------------
+
+/**
+ * Wait for a transaction receipt and verify the execution succeeded.
+ *
+ * GenLayer distinguishes between acceptance (consensus on the tx) and
+ * execution result. A tx can be ACCEPTED even if the contract raised an
+ * error (e.g. "window has closed", "only the owner"). We must check
+ * txExecutionResultName === 'FINISHED_WITH_RETURN' to confirm success.
+ */
+async function waitAndCheck(
+  client: ReturnType<typeof createClient>,
+  txHash: string,
+): Promise<string> {
+  const receipt = await client.waitForTransactionReceipt({
+    hash: txHash as `0x${string}`,
+  });
+
+  // The receipt shape from genlayer-js — check execution result name
+  const execResult = (receipt as Record<string, unknown>).txExecutionResultName as string | undefined;
+
+  if (execResult !== undefined && execResult !== 'FINISHED_WITH_RETURN') {
+    // Pull out any contract-level error message when available
+    const execErr = (receipt as Record<string, unknown>).txExecutionResult as Record<string, unknown> | undefined;
+    const contractMsg = execErr?.error ?? execErr?.message ?? execResult;
+    throw new Error(`Contract execution failed: ${contractMsg}`);
+  }
+
+  return txHash;
+}
+
+// ---------------------------------------------------------------------------
+// Hall (read) methods
+// ---------------------------------------------------------------------------
 
 /** Fetch the hall configuration */
 export async function readGetConfig(): Promise<HallConfig> {
@@ -50,24 +95,23 @@ export async function readGetRules(): Promise<Rule[]> {
   return result as unknown as Rule[];
 }
 
-/** Fetch standing for a member address */
+/** Fetch standing for a member address — maps raw output to Standing */
 export async function readGetStanding(address: string): Promise<Standing> {
   const result = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_standing',
     args: [address],
   });
-  return result as unknown as Standing;
+  return mapStanding(result as unknown as RawStanding);
 }
 
 /** Fetch a case registry entry by its address */
 export async function readGetCase(caseAddress: string): Promise<unknown> {
-  const result = await readClient.readContract({
+  return readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_case',
     args: [caseAddress],
   });
-  return result;
 }
 
 /** Fetch paginated list of case addresses */
@@ -99,7 +143,9 @@ export async function readGetCasesWithCount(offset = 0, limit = 20): Promise<Cas
   return { addresses, total };
 }
 
-// ---- Hall (write) methods ----
+// ---------------------------------------------------------------------------
+// Hall (write) methods
+// ---------------------------------------------------------------------------
 
 /** Add a new rule — owner only */
 export async function writeAddRule(
@@ -114,8 +160,7 @@ export async function writeAddRule(
     args: [title, text],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** Retire an existing rule — owner only */
@@ -130,8 +175,7 @@ export async function writeRetireRule(
     args: [ruleNumber],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** Forgive points for a member — owner only */
@@ -147,8 +191,7 @@ export async function writeForgivePoints(
     args: [member, points],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** File a new case against an accused */
@@ -165,20 +208,21 @@ export async function writeFileCase(
     args: [accused, ruleNumber, complaintUrl],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
-// ---- Case contract (read) methods ----
+// ---------------------------------------------------------------------------
+// Case contract (read) methods
+// ---------------------------------------------------------------------------
 
-/** Fetch full case status from a ConcordatCase contract */
+/** Fetch full case status — maps raw output to CaseStatus */
 export async function readCaseStatus(caseAddress: `0x${string}`): Promise<CaseStatus> {
   const result = await readClient.readContract({
     address: caseAddress,
     functionName: 'get_status',
     args: [],
   });
-  return result as unknown as CaseStatus;
+  return mapCaseStatus(result as unknown as RawCaseStatus);
 }
 
 /** Check if a ruling can be requested for a case */
@@ -191,7 +235,9 @@ export async function readCanRequestRuling(caseAddress: `0x${string}`): Promise<
   return result as unknown as boolean;
 }
 
-// ---- Case contract (write) methods ----
+// ---------------------------------------------------------------------------
+// Case contract (write) methods
+// ---------------------------------------------------------------------------
 
 /** Submit a defense URL — accused only */
 export async function writeCaseSubmitDefense(
@@ -206,8 +252,7 @@ export async function writeCaseSubmitDefense(
     args: [url],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** Request an AI ruling on a case — anyone can trigger */
@@ -222,8 +267,7 @@ export async function writeCaseRequestRuling(
     args: [],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** Appeal a ruling — losing party only */
@@ -239,8 +283,7 @@ export async function writeCaseAppeal(
     args: [groundsUrl],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
 /** Finalize a case after the appeal window passes */
@@ -255,11 +298,10 @@ export async function writeCaseFinalize(
     args: [],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
-/** Abandon a stuck appeal — anyone can call after timeout */
+/** Abandon a stuck appeal — anyone can call after review window passes */
 export async function writeCaseAbandonAppeal(
   senderAddress: `0x${string}`,
   caseAddress: `0x${string}`,
@@ -271,11 +313,12 @@ export async function writeCaseAbandonAppeal(
     args: [],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  await wc.waitForTransactionReceipt({ hash: txHash });
-  return txHash;
+  return waitAndCheck(wc, txHash);
 }
 
-// ---- Utility helpers ----
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
 
 /** Format seconds into a human-readable duration string */
 export function formatSeconds(seconds: number): string {
@@ -291,20 +334,26 @@ export function truncateAddress(address: string, chars = 6): string {
   return `${address.slice(0, chars + 2)}…${address.slice(-chars)}`;
 }
 
-/** Map raw errors to user-friendly messages */
+/**
+ * Map raw errors to user-friendly messages.
+ * Avoids hiding real errors behind a generic network-switch message.
+ */
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-    if (msg.includes('user rejected') || msg.includes('user denied')) {
+    const msg = error.message;
+    const lower = msg.toLowerCase();
+
+    if (lower.includes('user rejected') || lower.includes('user denied')) {
       return 'Transaction rejected by user.';
     }
-    if (msg.includes('wrong network') || msg.includes('chain')) {
+    if (lower.includes('switch') && lower.includes('network')) {
       return 'Please switch to GenLayer Studionet.';
     }
-    if (msg.includes('insufficient funds')) {
+    if (lower.includes('insufficient funds')) {
       return 'Insufficient funds for this transaction.';
     }
-    return error.message;
+    // Surface contract-level errors (e.g. "[EXPECTED] window has closed") as-is
+    return msg;
   }
   return 'An unexpected error occurred.';
 }

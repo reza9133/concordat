@@ -68,13 +68,18 @@ function ActionPanel({
   const status = caseStatus.status;
   const now = Math.floor(Date.now() / 1000);
 
-  // Determine available actions
+  // Determine available actions based on correctly mapped CaseStatus fields
   const actions: { key: CaseAction; label: string; icon: React.ElementType; condition: boolean; needsUrl: boolean; urlLabel?: string; urlPlaceholder?: string }[] = [
     {
       key: 'defense',
       label: 'Submit Defense',
       icon: Shield,
-      condition: status === 'open' && isAccused && now < caseStatus.defense_deadline,
+      // Accused can submit defense while case is open AND defense window is still open
+      // defense_closes_at = opened_at + defense_window (computed by mapper)
+      condition: status === 'open'
+        && isAccused
+        && !caseStatus.defense_url           // only one defense allowed
+        && now < caseStatus.defense_closes_at,
       needsUrl: true,
       urlLabel: 'Defense URL',
       urlPlaceholder: 'https://your-defense-document…',
@@ -83,6 +88,7 @@ function ActionPanel({
       key: 'ruling',
       label: 'Request Ruling',
       icon: Gavel,
+      // can_request_ruling is checked server-side; we use the hook value
       condition: canRequestRuling,
       needsUrl: false,
     },
@@ -90,10 +96,16 @@ function ActionPanel({
       key: 'appeal',
       label: 'Appeal Ruling',
       icon: Scale,
-      condition: status === 'ruled' && (
-        (isComplainant && caseStatus.first_ruling?.verdict === 'dismissed') ||
-        (isAccused && caseStatus.first_ruling?.verdict === 'sustained')
-      ) && caseStatus.appeal_deadline !== null && now < (caseStatus.appeal_deadline ?? Infinity),
+      // Only the losing party may appeal, within the appeal window
+      // Losing party: accused if violation=true, complainant if violation=false
+      condition: status === 'ruled'
+        && caseStatus.first_ruling !== null
+        && (
+          (isAccused && caseStatus.first_ruling.violation === true) ||
+          (isComplainant && caseStatus.first_ruling.violation === false)
+        )
+        && caseStatus.appeal_closes_at !== null
+        && now < (caseStatus.appeal_closes_at ?? Infinity),
       needsUrl: true,
       urlLabel: 'Appeal Grounds URL',
       urlPlaceholder: 'https://your-appeal-grounds…',
@@ -102,14 +114,21 @@ function ActionPanel({
       key: 'finalize',
       label: 'Finalize Case',
       icon: FileText,
-      condition: status === 'ruled' && caseStatus.appeal_deadline !== null && now > (caseStatus.appeal_deadline ?? 0),
+      // Case is ruled AND appeal window has passed (no appeal was filed)
+      condition: status === 'ruled'
+        && caseStatus.appeal_closes_at !== null
+        && now > (caseStatus.appeal_closes_at ?? 0),
       needsUrl: false,
     },
     {
       key: 'abandon',
       label: 'Abandon Appeal',
       icon: AlertCircle,
-      condition: status === 'under_appeal',
+      // Under appeal AND the review window (= one appeal_window after appealed_at) has passed.
+      // The contract rejects abandon_appeal before this window closes.
+      condition: status === 'under_appeal'
+        && caseStatus.review_closes_at !== null
+        && now > (caseStatus.review_closes_at ?? 0),
       needsUrl: false,
     },
   ];
@@ -389,7 +408,7 @@ export function CaseDetailPage() {
               </Card>
             </div>
 
-            {/* Ruling section */}
+            {/* First ruling */}
             {status.first_ruling && (
               <Card>
                 <CardHeader>
@@ -397,21 +416,26 @@ export function CaseDetailPage() {
                     <Gavel className="w-4 h-4 text-primary" />
                     First Ruling
                     <Badge
-                      variant={status.first_ruling.verdict === 'sustained' ? 'suspended' : 'good'}
+                      variant={status.first_ruling.violation ? 'suspended' : 'good'}
                       size="sm"
                     >
-                      {status.first_ruling.verdict === 'sustained' ? 'Sustained' : 'Dismissed'}
+                      {status.first_ruling.violation ? 'Violation Upheld' : 'Complaint Dismissed'}
                     </Badge>
                   </h3>
                 </CardHeader>
                 <CardBody>
+                  {status.first_ruling.summary && (
+                    <p className="text-sm font-medium text-text-primary mb-2">
+                      {status.first_ruling.summary}
+                    </p>
+                  )}
                   <p className="text-sm text-text-secondary leading-relaxed mb-3">
                     {status.first_ruling.reasoning}
                   </p>
-                  {status.first_ruling.penalty_points > 0 && (
+                  {status.first_ruling.violation && status.first_ruling.severity > 0 && (
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/20 text-sm text-danger font-medium">
                       <AlertCircle className="w-4 h-4" />
-                      {status.first_ruling.penalty_points} penalty points applied
+                      Severity {status.first_ruling.severity}/3
                     </div>
                   )}
                 </CardBody>
@@ -426,21 +450,31 @@ export function CaseDetailPage() {
                     <Scale className="w-4 h-4 text-secondary" />
                     Final Ruling
                     <Badge
-                      variant={status.final_ruling.verdict === 'sustained' ? 'suspended' : 'good'}
+                      variant={status.final_ruling.violation ? 'suspended' : 'good'}
                       size="sm"
                     >
-                      {status.final_ruling.verdict === 'sustained' ? 'Sustained' : 'Dismissed'}
+                      {status.final_ruling.violation ? 'Violation Upheld' : 'Complaint Dismissed'}
                     </Badge>
+                    {status.decided_by && (
+                      <span className="ml-auto text-xs font-normal text-text-secondary">
+                        via {status.decided_by.replace(/_/g, ' ')}
+                      </span>
+                    )}
                   </h3>
                 </CardHeader>
                 <CardBody>
+                  {status.final_ruling.summary && (
+                    <p className="text-sm font-medium text-text-primary mb-2">
+                      {status.final_ruling.summary}
+                    </p>
+                  )}
                   <p className="text-sm text-text-secondary leading-relaxed mb-3">
                     {status.final_ruling.reasoning}
                   </p>
-                  {status.final_ruling.penalty_points > 0 && (
+                  {status.final_ruling.violation && status.final_ruling.severity > 0 && (
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-danger/10 border border-danger/20 text-sm text-danger font-medium">
                       <AlertCircle className="w-4 h-4" />
-                      {status.final_ruling.penalty_points} penalty points applied
+                      Severity {status.final_ruling.severity}/3
                     </div>
                   )}
                 </CardBody>

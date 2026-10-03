@@ -52,7 +52,8 @@ export function StandingBadge({
   size = 'md',
   showPoints = false,
 }: StandingBadgeProps) {
-  const config = STANDING_CONFIG[standing.status] ?? STANDING_CONFIG.good;
+  // standing.status is already normalised by mapStanding() to 'good'|'probation'|'suspended'
+  const config = STANDING_CONFIG[standing.status as keyof typeof STANDING_CONFIG] ?? STANDING_CONFIG.good;
   const sizeConf = SIZE_CONFIG[size];
   const Icon = config.icon;
 

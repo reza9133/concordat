@@ -1,5 +1,10 @@
 // ============================================================
 // TypeScript types for Concordat dApp
+//
+// RAW_* types mirror the exact field names the contracts return.
+// The mapped types (HallConfig, Standing, CaseStatus …) are what
+// the UI works with. mapStanding() / mapCaseStatus() in
+// src/lib/mappers.ts translate between the two.
 // ============================================================
 
 /** Configuration returned by ConcordatHall.get_config() */
@@ -13,7 +18,7 @@ export interface HallConfig {
   appeal_window_seconds: number;
 }
 
-/** A rule in the rulebook */
+/** A rule in the rulebook — matches contract output directly */
 export interface Rule {
   number: number;
   title: string;
@@ -21,40 +26,116 @@ export interface Rule {
   active: boolean;
 }
 
-/** Member standing returned by ConcordatHall.get_standing() */
+// ---- Raw contract output shapes ----
+
+/**
+ * Raw shape returned by ConcordatHall.get_standing().
+ * NOTE: status field is called `label` in the contract and uses
+ * "good_standing" not "good".
+ */
+export interface RawStanding {
+  points: number;
+  /** "good_standing" | "probation" | "suspended" */
+  label: string;
+  /** number of dismissed complaints the member has filed */
+  dismissed_filed: number;
+}
+
+/**
+ * Raw shape returned by ConcordatCase.get_status().
+ * All field names match the Python dataclass exactly.
+ */
+export interface RawCaseStatus {
+  // Parties
+  hall: string;
+  complainant: string;
+  accused: string;
+  rule_number: number;
+  rule_title: string;
+  rule_text: string;
+  complaint_url: string;
+  defense_url: string;          // "" when none
+  defense_window: number;       // seconds
+  appeal_window: number;        // seconds
+  opened_at: number;            // unix timestamp
+  // Lifecycle
+  status: 'open' | 'ruled' | 'under_appeal' | 'final';
+  // First-instance ruling fields (all default/zero until ruled)
+  first_violation: boolean;
+  first_severity: number;
+  first_summary: string;
+  first_reasoning: string;
+  ruled_at: number;             // 0 until ruled
+  // Appeal
+  appeal_contract: string;      // "" until appeal filed
+  appellant: string;            // "" until appeal filed
+  appealed_at: number;          // 0 until appeal filed
+  // Final outcome
+  final_violation: boolean;
+  final_severity: number;
+  final_summary: string;
+  final_reasoning: string;
+  decided_by: string;           // "" | "first_instance" | "appeal" | "first_instance_appeal_abandoned"
+}
+
+// ---- Mapped / UI types ----
+
+/**
+ * Member standing — normalised from RawStanding.
+ * `status` is a simple three-value enum the UI can switch on.
+ */
 export interface Standing {
   points: number;
   status: 'good' | 'probation' | 'suspended';
   dismissed_complaints: number;
 }
 
-/** Full case status returned by ConcordatCase.get_status() */
+/**
+ * Normalised ruling outcome used in CaseStatus.
+ * `verdict` is true (violation sustained) or false (dismissed).
+ */
+export interface CaseRuling {
+  /** true = violation upheld, false = complaint dismissed */
+  violation: boolean;
+  severity: number;   // 0-3
+  summary: string;
+  reasoning: string;
+}
+
+/**
+ * Full case status — mapped from RawCaseStatus.
+ * Computed deadline timestamps are derived here so the UI doesn't
+ * have to re-derive them in every component.
+ */
 export interface CaseStatus {
-  case_address: string;
+  // Identifiers
   hall_address: string;
   complainant: string;
   accused: string;
   rule_number: number;
+  rule_title: string;
+  rule_text: string;
+  // Documents
   complaint_url: string;
-  defense_url: string | null;
+  defense_url: string | null;   // null when none
+  // Lifecycle
   status: 'open' | 'ruled' | 'under_appeal' | 'final';
-  first_ruling: CaseRuling | null;
-  final_ruling: CaseRuling | null;
-  appeal_grounds_url: string | null;
+  opened_at: number;            // unix timestamp
+  /** Unix timestamp when defense window closes (opened_at + defense_window) */
+  defense_closes_at: number;
+  /** Unix timestamp when appeal window closes, null until ruled */
+  appeal_closes_at: number | null;
+  ruled_at: number | null;      // null until ruled
+  // Appeal
+  appeal_contract: string | null;
   appellant: string | null;
-  filed_at: number;
-  defense_deadline: number;
-  ruled_at: number | null;
-  appeal_deadline: number | null;
-  finalized_at: number | null;
-}
-
-/** A ruling outcome */
-export interface CaseRuling {
-  verdict: 'sustained' | 'dismissed';
-  reasoning: string;
-  penalty_points: number;
-  ruled_at: number;
+  appealed_at: number | null;
+  /** Unix timestamp when appeal review window closes, null until under_appeal */
+  review_closes_at: number | null;
+  // Rulings
+  first_ruling: CaseRuling | null;   // null until ruled
+  final_ruling: CaseRuling | null;   // null until final
+  decided_by: string;
 }
 
 /** Paginated cases result */
