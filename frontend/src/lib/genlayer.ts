@@ -4,6 +4,7 @@
 // ============================================================
 
 import { createClient } from 'genlayer-js';
+import { getEthereumProvider } from './wallet';
 import type { TransactionHash } from 'genlayer-js/types';
 import { studionet } from 'genlayer-js/chains';
 import type {
@@ -37,10 +38,40 @@ const readClient = createClient({ chain: studionet });
  * not in the writeContract call params.
  */
 function writeClient(senderAddress: `0x${string}`) {
+  // The wallet provider is passed explicitly so signing always goes through
+  // the wallet the user connected, not whichever extension injected first.
   return createClient({
     chain: studionet,
     account: senderAddress,
-  });
+    provider: getEthereumProvider() ?? undefined,
+  } as Parameters<typeof createClient>[0]);
+}
+
+type WriteClient = ReturnType<typeof writeClient>;
+type WriteParams = Parameters<WriteClient['writeContract']>[0];
+
+/**
+ * Fee-charging networks (Consensus v0.6, genlayer-js v2) require a fee
+ * distribution and deposit on every write. Older SDKs and gasless Studio
+ * deployments do not expose the estimator; there the write is sent as before.
+ */
+async function sendWrite(client: WriteClient, params: WriteParams): Promise<string> {
+  const estimator = (client as unknown as {
+    estimateTransactionFeesForWrite?: (
+      args: unknown,
+    ) => Promise<{ distribution: unknown; feeValue: bigint }>;
+  }).estimateTransactionFeesForWrite;
+
+  let fees: { distribution: unknown; feeValue: bigint } | undefined;
+  if (typeof estimator === 'function') {
+    try {
+      const estimate = await estimator.call(client, params);
+      fees = { distribution: estimate.distribution, feeValue: estimate.feeValue };
+    } catch {
+      fees = undefined; // gasless network: nothing to attach
+    }
+  }
+  return client.writeContract((fees ? { ...params, fees } : params) as WriteParams);
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +236,7 @@ export async function writeAddRule(
   text: string,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: CONTRACT_ADDRESS,
     functionName: 'add_rule',
     args: [title, text],
@@ -220,7 +251,7 @@ export async function writeRetireRule(
   ruleNumber: number,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: CONTRACT_ADDRESS,
     functionName: 'retire_rule',
     args: [ruleNumber],
@@ -236,7 +267,7 @@ export async function writeForgivePoints(
   points: number,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: CONTRACT_ADDRESS,
     functionName: 'forgive_points',
     args: [member, points],
@@ -253,7 +284,7 @@ export async function writeFileCase(
   complaintUrl: string,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: CONTRACT_ADDRESS,
     functionName: 'file_case',
     args: [accused, ruleNumber, complaintUrl],
@@ -275,7 +306,7 @@ export async function readCaseStatus(caseAddress: `0x${string}`): Promise<CaseSt
   })) as unknown as RawCaseStatus;
 
   // The appeal grounds URL is stored on the appeal contract, not the case.
-  let appeal: { grounds_url?: unknown } | null = null;
+  let appeal: { grounds_url?: unknown; status?: unknown } | null = null;
   const appealAddress = /^0x0{40}$/i.test(result.appeal_contract ?? '')
     ? ''
     : result.appeal_contract;
@@ -285,7 +316,7 @@ export async function readCaseStatus(caseAddress: `0x${string}`): Promise<CaseSt
         address: appealAddress as `0x${string}`,
         functionName: 'get_status',
         args: [],
-      })) as unknown as { grounds_url?: unknown };
+      })) as unknown as { grounds_url?: unknown; status?: unknown };
     } catch {
       appeal = null; // the case page still works without the grounds link
     }
@@ -314,7 +345,7 @@ export async function writeCaseSubmitDefense(
   url: string,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'submit_defense',
     args: [url],
@@ -329,7 +360,7 @@ export async function writeCaseRequestRuling(
   caseAddress: `0x${string}`,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'request_ruling',
     args: [],
@@ -345,7 +376,7 @@ export async function writeCaseAppeal(
   groundsUrl: string,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'appeal',
     args: [groundsUrl],
@@ -360,7 +391,7 @@ export async function writeCaseFinalize(
   caseAddress: `0x${string}`,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'finalize',
     args: [],
@@ -375,7 +406,7 @@ export async function writeCaseAbandonAppeal(
   caseAddress: `0x${string}`,
 ): Promise<string> {
   const wc = writeClient(senderAddress);
-  const txHash = await wc.writeContract({
+  const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'abandon_appeal',
     args: [],

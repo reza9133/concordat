@@ -127,6 +127,7 @@ function ActionPanel({
       // Under appeal AND the review window (= one appeal_window after appealed_at) has passed.
       // The contract rejects abandon_appeal before this window closes.
       condition: status === 'under_appeal'
+        && !caseStatus.appeal_decided   // a decided review is only waiting to finalize
         && caseStatus.review_closes_at !== null
         && now >= (caseStatus.review_closes_at ?? 0),
       needsUrl: false,
@@ -155,11 +156,11 @@ function ActionPanel({
           break;
         case 'appeal':
           await writeCaseAppeal(addr, cAddr, urlInput);
-          toastSuccess('Appeal Filed', 'Your appeal has been submitted.');
+          toastSuccess('Appeal Filed', 'Anyone can now trigger its review. The result applies once finalized.');
           break;
         case 'finalize':
           await writeCaseFinalize(addr, cAddr);
-          toastSuccess('Case Finalized', 'The case outcome is now permanent.');
+          toastSuccess('Case Finalized', 'Recorded. Standings update once the network finalizes it.');
           break;
         case 'abandon':
           await writeCaseAbandonAppeal(addr, cAddr);

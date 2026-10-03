@@ -47,8 +47,14 @@ together and only the first one is deployed by hand.
    the defense, and an appeal without readable grounds leaves the first ruling
    standing. If an appeal still produces no result within one appeal window
    (for example the complaint page died), anyone can call `abandon_appeal()` and
-   the case closes with the first ruling. An unreadable *complaint* page still
-   makes the ruling fail and can be retried; it blocks only the complainant.
+   the case closes with the first ruling. `abandon_appeal()` refuses to run once
+   the appeal review has already been decided: that result is only waiting for
+   its finalization message and must not be thrown away. An unreadable
+   *complaint* page still makes the ruling fail and can be retried; it blocks
+   only the complainant.
+   **Evidence is pinned.** The ruling stores a hash of the complaint and defense
+   pages it read. If either page has changed (or died) by the time of an appeal,
+   the first ruling stands instead of being re-judged on edited material.
 8. **Outcome.** If nobody appeals, anyone can call `finalize()` after the
    window. Either way the case sends `report_final` to the hall, which updates
    standings:
@@ -57,6 +63,8 @@ together and only the first one is deployed by hand.
    - `probation` and `suspended` labels follow the point thresholds
    - suspended members, and members with too many dismissed complaints, cannot
      file new cases; the owner can grant amnesty with `forgive_points`
+   - a member can have at most `max_dismissed_complaints` unsettled cases open
+     at once, so the lockout cannot be dodged by filing a swarm of cases first
 
 ## Why the contracts can trust each other
 
@@ -134,7 +142,7 @@ genlayer network set studionet
 #    community, probation_points, suspension_points,
 #    max_dismissed_complaints, defense_window_seconds, appeal_window_seconds
 genlayer deploy --contract contracts/concordat_hall.py \
-  --args "Open Garden" 3 6 2 300 300
+  --args "Open Garden" 5 10 3 86400 86400
 ```
 
 Copy the hall address from the output, then:
@@ -178,9 +186,14 @@ Notes:
   contracts accept an address or a string, so both forms work.
 - Use two or three different accounts: owner, complainant and accused. Each
   role is enforced on-chain.
-- Evidence URLs must be plain, public pages that validators can fetch
-  (for example raw gist or paste URLs). Keep them short; only the first 6000
-  characters of each page are read.
+- Evidence URLs must be plain, public pages that name a domain (no IP
+  addresses, `localhost`, intranet or `.local` hosts, or embedded credentials)
+  and that validators can fetch. Use pages that will not change after filing,
+  such as a gist at a fixed revision or an archive link: the ruling pins a hash
+  of the page, so a page edited afterwards makes any appeal fall back to the
+  first ruling. Only the first 6000 characters of each page are read.
+- Both windows must be between 60 seconds and one year. Keep them longer than
+  the network finality window so results can arrive before a window closes.
 - Outcomes reach the hall through `on="finalized"` messages, so standings
   update only after the ruling transaction has finalized, not at acceptance.
 - If your CLI version asks for a fee profile or fee arguments, follow the

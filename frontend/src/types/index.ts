@@ -39,6 +39,8 @@ export interface RawStanding {
   label: string;
   /** number of dismissed complaints the member has filed */
   dismissed_filed: number;
+  /** complaints filed by the member that are not settled yet */
+  open_filed?: number;
 }
 
 /**
@@ -91,6 +93,8 @@ export interface Standing {
   points: number;
   status: 'good' | 'probation' | 'suspended';
   dismissed_complaints: number;
+  /** unsettled complaints; capped by the hall's max_dismissed_complaints */
+  open_cases: number;
 }
 
 /**
@@ -122,6 +126,8 @@ export interface CaseStatus {
   defense_url: string | null;   // null when none
   /** Lives on the appeal contract; null until an appeal is filed */
   appeal_grounds_url: string | null;
+  /** true once the appeal review has a result that is waiting to be finalized */
+  appeal_decided: boolean;
   // Lifecycle
   status: 'open' | 'ruled' | 'under_appeal' | 'final';
   opened_at: number;            // unix timestamp

@@ -9,6 +9,7 @@ using `direct_vm.prank(...)` to play the role of the sender the protocol
 would have supplied.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +27,11 @@ SDK_VERSION = os.environ.get("CONCORDAT_SDK_VERSION") or None
 
 FIRST_WINDOW = 3600  # defense / appeal windows used by the fixtures (seconds)
 T0 = "2026-03-01T12:00:00Z"
+
+
+def digest(text: str) -> str:
+    """The whitespace-insensitive page digest the contracts pin evidence with."""
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()
 
 
 def to_hex(raw) -> str:
@@ -88,3 +94,10 @@ def clock(direct_vm):
 
 def llm_json(**fields) -> str:
     return json.dumps(fields)
+
+
+def page_digest(text: str) -> str:
+    """Mirror of the contracts' whitespace-insensitive page hash."""
+    import hashlib
+
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()

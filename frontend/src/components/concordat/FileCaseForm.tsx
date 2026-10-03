@@ -35,7 +35,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
     if (!ruleNumber) {
       newErrors.ruleNumber = 'Please select a rule that was violated';
     }
-    if (!complaintUrl || (!complaintUrl.startsWith('http://') && !complaintUrl.startsWith('https://'))) {
+    if (!complaintUrl || (!complaintUrl.startsWith('http://') && !complaintUrl.startsWith('https://')) || /^https?:\/\/(localhost|\[|\d+(\.|\/|:|$))/i.test(complaintUrl)) {
       newErrors.complaintUrl = 'Enter a valid URL (http:// or https://)';
     }
     setErrors(newErrors);
@@ -139,7 +139,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
             ${errors.complaintUrl ? 'border-danger focus:border-danger focus:ring-danger/30' : 'border-border'}`}
         />
         <p className="mt-1.5 text-xs text-text-secondary">
-          Link to evidence (GitHub issue, forum post, etc.). This URL will be immutably recorded on-chain.
+          Link to evidence on a public website (a domain name, not an IP address). Only the URL is recorded, not the page, so prefer a page that will not change, such as a gist revision or an archived copy. If the page is edited after the ruling, an appeal cannot re-judge it and the first ruling stands.
         </p>
         {errors.complaintUrl && (
           <p className="mt-1.5 text-xs text-danger">{errors.complaintUrl}</p>

@@ -89,7 +89,7 @@ def test_file_case_uses_a_fresh_salt_per_case(hall, direct_vm, direct_alice, dir
     second = _file(hall, direct_vm, direct_alice, direct_bob)
     assert first != second
     salts = [d["salt_nonce"] for d in recorder.deploys()]
-    assert salts == [1, 2]
+    assert len(set(salts)) == 2 and all(0 < s < 2**256 for s in salts)
 
 
 def test_file_case_rejections(hall, direct_vm, direct_alice, direct_bob, direct_owner):
@@ -100,6 +100,15 @@ def test_file_case_rejections(hall, direct_vm, direct_alice, direct_bob, direct_
         hall.file_case(to_hex(direct_alice), 1, COMPLAINT)
     with direct_vm.expect_revert("http(s) URL"):
         hall.file_case(to_hex(direct_bob), 1, "not-a-url")
+    for bad in (
+        "http://127.0.0.1/x",
+        "http://169.254.169.254/latest",
+        "http://localhost/x",
+        "http://intranet/x",
+        "https://user:pw@example.org/x",
+    ):
+        with direct_vm.expect_revert("[EXPECTED]"):
+            hall.file_case(to_hex(direct_bob), 1, bad)
 
     direct_vm.sender = direct_owner
     hall.retire_rule(2)
@@ -198,3 +207,31 @@ def test_forgive_points_and_get_cases_reject_negative_numbers(deploy, direct_vm,
     assert hall.get_standing(to_hex(direct_alice))["points"] == 0
     with direct_vm.expect_revert("must not be negative"):
         hall.get_cases(-1, 5)
+
+
+def test_constructor_rejects_unusable_windows(deploy, direct_vm):
+    with direct_vm.expect_revert("appeal_window_seconds"):
+        deploy(CONTRACTS / "concordat_hall.py", "Bad", 1, 2, 2, 60, 0)
+
+
+def test_the_launch_configuration_deploys(deploy, direct_vm, direct_owner):
+    direct_vm.sender = direct_owner
+    hall = deploy(CONTRACTS / "concordat_hall.py", "Open Garden", 5, 10, 3, 86400, 86400)
+    config = hall.get_config()
+    assert config["community"] == "Open Garden"
+    assert config["probation_points"] == 5 and config["suspension_points"] == 10
+    assert config["max_dismissed_complaints"] == 3
+    assert config["defense_window_seconds"] == 86400 and config["appeal_window_seconds"] == 86400
+
+
+def test_unsettled_cases_per_member_are_capped(hall, direct_vm, direct_alice, direct_bob):
+    # The fixture hall allows 2 dismissed complaints, so also 2 unsettled ones.
+    first = _file(hall, direct_vm, direct_alice, direct_bob)
+    _file(hall, direct_vm, direct_alice, direct_bob)
+    assert hall.get_standing(to_hex(direct_alice))["open_filed"] == 2
+    with direct_vm.expect_revert("maximum number of unsettled cases"):
+        hall.file_case(to_hex(direct_bob), 1, COMPLAINT)
+
+    _settle(hall, direct_vm, first, True, 1)  # settling frees a slot
+    assert hall.get_standing(to_hex(direct_alice))["open_filed"] == 1
+    _file(hall, direct_vm, direct_alice, direct_bob)

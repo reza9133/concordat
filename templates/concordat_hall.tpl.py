@@ -30,7 +30,17 @@ by hand; edit the case or appeal contract and re-run the build.
 from genlayer import *
 from dataclasses import dataclass
 import base64
+import hashlib
+import ipaddress
 import typing
+from urllib.parse import urlsplit
+
+ERR_EXPECTED = "[EXPECTED]"
+
+MIN_WINDOW_SECONDS = 60
+MAX_WINDOW_SECONDS = 365 * 24 * 3600
+MAX_POINTS = 1_000_000
+MAX_LOCKOUT = 10_000
 
 # @@BEGIN_EMBED case@@
 _CASE_B64 = ""
@@ -43,9 +53,38 @@ def _addr(value) -> Address:
     return Address(value)
 
 
+MAX_URL_CHARS = 1000
+_LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+
+
 def _require_http_url(url: str, what: str) -> None:
-    if not (url.startswith("https://") or url.startswith("http://")):
-        raise gl.vm.UserError(f"[EXPECTED] {what} must be an http(s) URL")
+    """Accept only public-looking http(s) URLs that name a domain."""
+    if not isinstance(url, str) or len(url) > MAX_URL_CHARS:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must be an http(s) URL of at most {MAX_URL_CHARS} characters")
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().rstrip(".")
+    if parts.scheme not in ("http", "https") or host == "":
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must be an http(s) URL")
+    if parts.username is not None or parts.password is not None:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must not contain credentials")
+    is_ip = True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        is_ip = False
+    tld = host.rsplit(".", 1)[-1]
+    if tld.isdigit() or tld.startswith("0x"):
+        is_ip = True  # dotted/hex shorthand such as 127.1 or 0x7f.1
+    if is_ip:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must use a domain name, not an IP address")
+    if host == "localhost" or "." not in host or host.endswith(_LOCAL_SUFFIXES):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must point at a public website")
+
+
+def _salt(*parts) -> u256:
+    """Deterministic, collision-resistant CREATE2-style salt for a child contract."""
+    digest = hashlib.sha256("|".join(str(p) for p in parts).encode("utf-8")).digest()
+    return u256(int.from_bytes(digest, "big"))
 
 
 @allow_storage
@@ -63,6 +102,7 @@ class Standing:
     upheld_against: u32
     dismissed_filed: u32
     cases_filed: u32
+    open_filed: u32  # complaints filed by this member that are not settled yet
 
 
 @allow_storage
@@ -100,12 +140,27 @@ class ConcordatHall(gl.Contract):
         defense_window_seconds: int,
         appeal_window_seconds: int,
     ):
+        if community.strip() == "" or len(community) > 100:
+            raise gl.vm.UserError("[EXPECTED] community needs a name of at most 100 characters")
         if probation_points < 1 or suspension_points <= probation_points:
             raise gl.vm.UserError(
                 "[EXPECTED] need 1 <= probation_points < suspension_points"
             )
-        if max_dismissed_complaints < 1:
-            raise gl.vm.UserError("[EXPECTED] max_dismissed_complaints must be at least 1")
+        if suspension_points > MAX_POINTS:
+            raise gl.vm.UserError("[EXPECTED] suspension_points is unreasonably large")
+        if max_dismissed_complaints < 1 or max_dismissed_complaints > MAX_LOCKOUT:
+            raise gl.vm.UserError(
+                "[EXPECTED] max_dismissed_complaints must be between 1 and %d" % MAX_LOCKOUT
+            )
+        for label, seconds in (
+            ("defense_window_seconds", defense_window_seconds),
+            ("appeal_window_seconds", appeal_window_seconds),
+        ):
+            if seconds < MIN_WINDOW_SECONDS or seconds > MAX_WINDOW_SECONDS:
+                raise gl.vm.UserError(
+                    "[EXPECTED] %s must be between %d and %d seconds"
+                    % (label, MIN_WINDOW_SECONDS, MAX_WINDOW_SECONDS)
+                )
 
         self.owner = gl.message.sender_address
         self.community = community
@@ -175,9 +230,27 @@ class ConcordatHall(gl.Contract):
                 "[EXPECTED] you cannot file cases right now (suspended, or too many "
                 "dismissed complaints)"
             )
+        # Dismissals only count once a case settles, so unsettled complaints
+        # are capped by the same number. Without this one member could open a
+        # swarm of cases before the first one is ever dismissed.
+        if self._open_cases(complainant) >= self.max_dismissed_complaints:
+            raise gl.vm.UserError(
+                "[EXPECTED] you already have the maximum number of unsettled cases; "
+                "wait for one to settle before filing another"
+            )
 
         self.case_count = u32(self.case_count + 1)
-        salt_nonce = u256(self.case_count)
+        # Derived from the case's own parameters as well as the counter, so a
+        # re-executed filing can never land on an address that already holds a
+        # differently-configured case.
+        salt_nonce = _salt(
+            "case",
+            int(self.case_count),
+            complainant.as_hex,
+            accused_address.as_hex,
+            int(number),
+            complaint_url,
+        )
 
         # on="accepted" so the case is usable right away. The case holds no
         # funds, and the hall only trusts its report after finalization.
@@ -210,6 +283,7 @@ class ConcordatHall(gl.Contract):
 
         standing = self._standing(complainant)
         standing.cases_filed = u32(standing.cases_filed + 1)
+        standing.open_filed = u32(standing.open_filed + 1)
         self._standing(accused_address)  # make sure the accused has a record
 
         return case_address.as_hex
@@ -225,6 +299,11 @@ class ConcordatHall(gl.Contract):
         record = self.cases[case_address]
         if record.status != "pending":
             raise gl.vm.UserError("[EXPECTED] this case has already been settled")
+
+        # The complainant's case is no longer unsettled, whatever the outcome.
+        filer = self._standing(record.complainant)
+        if filer.open_filed > 0:
+            filer.open_filed = u32(filer.open_filed - 1)
 
         if violation:
             points = max(1, min(3, int(severity)))
@@ -249,6 +328,7 @@ class ConcordatHall(gl.Contract):
                 upheld_against=u32(0),
                 dismissed_filed=u32(0),
                 cases_filed=u32(0),
+                open_filed=u32(0),
             )
         return self.standings[member]
 
@@ -258,6 +338,11 @@ class ConcordatHall(gl.Contract):
         if points >= self.probation_points:
             return "probation"
         return "good_standing"
+
+    def _open_cases(self, member: Address) -> int:
+        if member not in self.standings:
+            return 0
+        return int(self.standings[member].open_filed)
 
     def _can_file(self, member: Address) -> bool:
         if member not in self.standings:
@@ -308,6 +393,7 @@ class ConcordatHall(gl.Contract):
                 "upheld_against": 0,
                 "dismissed_filed": 0,
                 "cases_filed": 0,
+                "open_filed": 0,
                 "label": "good_standing",
                 "can_file": True,
             }
@@ -317,6 +403,7 @@ class ConcordatHall(gl.Contract):
             "upheld_against": standing.upheld_against,
             "dismissed_filed": standing.dismissed_filed,
             "cases_filed": standing.cases_filed,
+            "open_filed": standing.open_filed,
             "label": self._label(int(standing.points)),
             "can_file": self._can_file(address),
         }

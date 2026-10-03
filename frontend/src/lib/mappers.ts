@@ -38,6 +38,7 @@ export function mapStanding(raw: RawStanding): Standing {
     points: Number(raw.points ?? 0),
     status,
     dismissed_complaints: Number(raw.dismissed_filed ?? 0),
+    open_cases: Number(raw.open_filed ?? 0),
   };
 }
 
@@ -108,7 +109,7 @@ function timeOrNull(value: unknown): number | null {
  */
 export function mapCaseStatus(
   raw: RawCaseStatus,
-  appeal: { grounds_url?: unknown } | null = null,
+  appeal: { grounds_url?: unknown; status?: unknown } | null = null,
 ): CaseStatus {
   const groundsUrl = appeal && typeof appeal.grounds_url === 'string' ? appeal.grounds_url : '';
 
@@ -121,6 +122,8 @@ export function mapCaseStatus(
     complaint_url: String(raw.complaint_url ?? ''),
     defense_url: raw.defense_url ? String(raw.defense_url) : null,
     appeal_grounds_url: groundsUrl || null,
+    // The review already has a result and only waits for the network to finalize it.
+    appeal_decided: !!appeal && String(appeal.status ?? '') === 'decided',
     status: raw.status,
     opened_at: Number(raw.opened_at ?? 0),
     defense_closes_at: Number(raw.defense_closes_at ?? 0),
