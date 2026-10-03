@@ -20,7 +20,7 @@ import { mapStanding, mapCaseStatus } from './mappers';
 
 /** The deployed ConcordatHall contract address */
 export const CONTRACT_ADDRESS = (
-  import.meta.env.VITE_CONTRACT_ADDRESS || '0xd331E549611fb669770FD8C3906eeF0eDDf43Fc5'
+  import.meta.env.VITE_CONTRACT_ADDRESS || '0x4793d668Be91D99b460f33cd9a4BF7CfFEBcE8f8'
 ) as `0x${string}`;
 
 /** Project links */
