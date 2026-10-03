@@ -7,7 +7,7 @@ import { Github, ExternalLink, BookOpen } from 'lucide-react';
 import { ConcordatLogo } from './ConcordatLogo';
 import { GenLayerLogo } from './GenLayerLogo';
 import { ContractAddress } from '../ui/ContractAddress';
-import { CONTRACT_ADDRESS } from '../../lib/genlayer';
+import { CONTRACT_ADDRESS, GITHUB_URL, EXPLORER_URL } from '../../lib/genlayer';
 
 const FOOTER_LINKS = {
   product: [
@@ -19,8 +19,8 @@ const FOOTER_LINKS = {
   resources: [
     { label: 'Documentation', to: '/docs' },
     { label: 'GenLayer Docs', href: 'https://docs.genlayer.com', external: true },
-    { label: 'GitHub', href: 'https://github.com', external: true },
-    { label: 'Studionet Explorer', href: 'https://studio.genlayer.com', external: true },
+    { label: 'GitHub', href: GITHUB_URL, external: true },
+    { label: 'Studionet Explorer', href: EXPLORER_URL, external: true },
   ],
 };
 
@@ -45,13 +45,13 @@ export function Footer() {
               <p className="text-xs text-text-secondary mb-1 font-medium uppercase tracking-wide">
                 Contract Address
               </p>
-              <ContractAddress address={CONTRACT_ADDRESS} size="sm" />
+              <ContractAddress address={CONTRACT_ADDRESS} size="sm" explorerUrl={EXPLORER_URL} />
             </div>
 
             {/* Social links */}
             <div className="mt-4 flex items-center gap-3">
               <a
-                href="https://github.com"
+                href={GITHUB_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 rounded-lg hover:bg-background text-text-secondary hover:text-text-primary transition-colors"

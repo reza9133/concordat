@@ -5,6 +5,7 @@
 import { Users, Crown, Clock, Shield, AlertTriangle, XOctagon, FileX } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '../ui/Card';
 import { ContractAddress } from '../ui/ContractAddress';
+import { CONTRACT_ADDRESS, EXPLORER_URL } from '../../lib/genlayer';
 import { formatSeconds, truncateAddress } from '../../lib/genlayer';
 import type { HallConfig } from '../../types';
 
@@ -103,7 +104,15 @@ export function HallConfigCard({ config }: HallConfigCardProps) {
         </div>
 
         <div className="mt-4 pt-4 border-t border-border">
-          <ContractAddress label="Contract:" address={config.owner} size="sm" />
+          <div className="space-y-2">
+            <ContractAddress
+              label="Contract:"
+              address={CONTRACT_ADDRESS}
+              size="sm"
+              explorerUrl={EXPLORER_URL}
+            />
+            <ContractAddress label="Owner:" address={config.owner} size="sm" />
+          </div>
         </div>
       </CardBody>
     </Card>

@@ -19,8 +19,12 @@ import { mapStanding, mapCaseStatus } from './mappers';
 
 /** The deployed ConcordatHall contract address */
 export const CONTRACT_ADDRESS = (
-  import.meta.env.VITE_CONTRACT_ADDRESS || '0x7F0b950E72E9674D5712c13BAe05f4FbA2250Cb5'
+  import.meta.env.VITE_CONTRACT_ADDRESS || '0xd331E549611fb669770FD8C3906eeF0eDDf43Fc5'
 ) as `0x${string}`;
+
+/** Project links */
+export const GITHUB_URL = 'https://github.com/reza9133/concordat';
+export const EXPLORER_URL = `https://explorer-studio.genlayer.com/address/${CONTRACT_ADDRESS}`;
 
 /**
  * Read-only client — no account needed for view methods.
