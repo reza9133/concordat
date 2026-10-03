@@ -17,7 +17,7 @@ A modern, multi-page React + TypeScript dApp for the **Concordat** intelligent c
 | | |
 |---|---|
 | **Contract** | `ConcordatHall` |
-| **Address** | `0xd331E549611fb669770FD8C3906eeF0eDDf43Fc5` |
+| **Address** | `0x4793d668Be91D99b460f33cd9a4BF7CfFEBcE8f8` |
 | **Network** | GenLayer Studionet |
 
 ## Pages
@@ -46,7 +46,7 @@ npm run dev
 Copy `.env.example` to `.env` (already pre-filled):
 
 ```
-VITE_CONTRACT_ADDRESS=0xd331E549611fb669770FD8C3906eeF0eDDf43Fc5
+VITE_CONTRACT_ADDRESS=0x4793d668Be91D99b460f33cd9a4BF7CfFEBcE8f8
 ```
 
 ## Build for Production
@@ -70,7 +70,7 @@ The `public/_redirects` file is already configured for Cloudflare Pages SPA rout
    - **Build command**: `npm run build`
    - **Build output directory**: `dist`
    - **Root directory**: `concordat/frontend` (if monorepo)
-4. Add environment variable: `VITE_CONTRACT_ADDRESS=0xd331E549611fb669770FD8C3906eeF0eDDf43Fc5`
+4. Add environment variable: `VITE_CONTRACT_ADDRESS=0x4793d668Be91D99b460f33cd9a4BF7CfFEBcE8f8`
 5. Deploy — every push to main auto-deploys via GitHub → Cloudflare.
 
 ## Project Structure
