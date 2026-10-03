@@ -81,35 +81,36 @@ function buildFinalRuling(raw: RawCaseStatus): CaseRuling | null {
 // CaseStatus
 // ---------------------------------------------------------------------------
 
+const ZERO_ADDRESS = /^0x0{40}$/i;
+
+/** The contract reports "no address" as the zero address, not "". */
+function addressOrNull(value: unknown): string | null {
+  const s = typeof value === 'string' ? value : '';
+  return s && !ZERO_ADDRESS.test(s) ? s : null;
+}
+
+/** 0 means "not set yet" in the contract's timestamps. */
+function timeOrNull(value: unknown): number | null {
+  const n = Number(value ?? 0);
+  return n > 0 ? n : null;
+}
+
 /**
  * Map the raw `get_status` result to the normalised CaseStatus type.
  *
- * Computed deadline timestamps:
- *   defense_closes_at = opened_at + defense_window
- *   appeal_closes_at  = ruled_at  + appeal_window  (null until ruled)
- *   review_closes_at  = appealed_at + appeal_window (null until under_appeal)
+ * The deadlines come straight from the contract (`defense_closes_at`,
+ * `appeal_closes_at`, `review_closes_at`), so the UI button conditions
+ * match what the contract enforces on-chain. get_status does not return
+ * the window lengths, so they must never be recomputed here.
  *
- * These mirror what the contract checks on-chain, so the UI button
- * conditions stay in sync with contract-level enforcement.
+ * `appeal` is the appeal contract's get_status() (or null): the grounds
+ * URL is stored there, not on the case.
  */
-export function mapCaseStatus(raw: RawCaseStatus): CaseStatus {
-  const openedAt = Number(raw.opened_at ?? 0);
-  const defenseWindow = Number(raw.defense_window ?? 0);
-  const appealWindow = Number(raw.appeal_window ?? 0);
-  const ruledAt = Number(raw.ruled_at ?? 0);
-  const appealedAt = Number(raw.appealed_at ?? 0);
-
-  const defenseClosesAt = openedAt + defenseWindow;
-
-  const appealClosesAt =
-    raw.status !== 'open' && ruledAt > 0
-      ? ruledAt + appealWindow
-      : null;
-
-  const reviewClosesAt =
-    raw.status === 'under_appeal' && appealedAt > 0
-      ? appealedAt + appealWindow
-      : null;
+export function mapCaseStatus(
+  raw: RawCaseStatus,
+  appeal: { grounds_url?: unknown } | null = null,
+): CaseStatus {
+  const groundsUrl = appeal && typeof appeal.grounds_url === 'string' ? appeal.grounds_url : '';
 
   return {
     hall_address: String(raw.hall ?? ''),
@@ -117,18 +118,18 @@ export function mapCaseStatus(raw: RawCaseStatus): CaseStatus {
     accused: String(raw.accused ?? ''),
     rule_number: Number(raw.rule_number ?? 0),
     rule_title: String(raw.rule_title ?? ''),
-    rule_text: String(raw.rule_text ?? ''),
     complaint_url: String(raw.complaint_url ?? ''),
-    defense_url: raw.defense_url && raw.defense_url !== '' ? String(raw.defense_url) : null,
+    defense_url: raw.defense_url ? String(raw.defense_url) : null,
+    appeal_grounds_url: groundsUrl || null,
     status: raw.status,
-    opened_at: openedAt,
-    defense_closes_at: defenseClosesAt,
-    appeal_closes_at: appealClosesAt,
-    ruled_at: ruledAt > 0 ? ruledAt : null,
-    appeal_contract: raw.appeal_contract && raw.appeal_contract !== '' ? String(raw.appeal_contract) : null,
-    appellant: raw.appellant && raw.appellant !== '' ? String(raw.appellant) : null,
-    appealed_at: appealedAt > 0 ? appealedAt : null,
-    review_closes_at: reviewClosesAt,
+    opened_at: Number(raw.opened_at ?? 0),
+    defense_closes_at: Number(raw.defense_closes_at ?? 0),
+    appeal_closes_at: timeOrNull(raw.appeal_closes_at),
+    ruled_at: timeOrNull(raw.ruled_at),
+    appeal_contract: addressOrNull(raw.appeal_contract),
+    appellant: addressOrNull(raw.appellant),
+    appealed_at: timeOrNull(raw.appealed_at),
+    review_closes_at: timeOrNull(raw.review_closes_at),
     first_ruling: buildFirstRuling(raw),
     final_ruling: buildFinalRuling(raw),
     decided_by: String(raw.decided_by ?? ''),

@@ -117,7 +117,7 @@ function ActionPanel({
       // Case is ruled AND appeal window has passed (no appeal was filed)
       condition: status === 'ruled'
         && caseStatus.appeal_closes_at !== null
-        && now > (caseStatus.appeal_closes_at ?? 0),
+        && now >= (caseStatus.appeal_closes_at ?? 0),
       needsUrl: false,
     },
     {
@@ -128,7 +128,7 @@ function ActionPanel({
       // The contract rejects abandon_appeal before this window closes.
       condition: status === 'under_appeal'
         && caseStatus.review_closes_at !== null
-        && now > (caseStatus.review_closes_at ?? 0),
+        && now >= (caseStatus.review_closes_at ?? 0),
       needsUrl: false,
     },
   ];

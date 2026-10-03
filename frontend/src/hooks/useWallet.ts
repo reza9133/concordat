@@ -22,13 +22,33 @@ interface UseWalletReturn {
   switchNetwork: () => Promise<void>;
 }
 
+const DISCONNECT_KEY = 'concordat:disconnected';
+
+function isDisconnected(): boolean {
+  try {
+    return localStorage.getItem(DISCONNECT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setDisconnected(value: boolean): void {
+  try {
+    if (value) localStorage.setItem(DISCONNECT_KEY, '1');
+    else localStorage.removeItem(DISCONNECT_KEY);
+  } catch {
+    /* storage unavailable: disconnect only lasts for this session */
+  }
+}
+
 export function useWallet(): UseWalletReturn {
   const [address, setAddress] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load existing accounts on mount
+  // Load existing accounts on mount (unless the user disconnected on purpose)
   useEffect(() => {
+    if (isDisconnected()) return;
     getAccounts().then((accounts) => {
       if (accounts.length > 0) setAddress(accounts[0]);
     });
@@ -37,6 +57,7 @@ export function useWallet(): UseWalletReturn {
   // Subscribe to wallet events
   useEffect(() => {
     const unsubAccounts = onAccountsChanged((accounts) => {
+      if (isDisconnected()) return;
       if (accounts.length > 0) {
         setAddress(accounts[0]);
       } else {
@@ -46,6 +67,7 @@ export function useWallet(): UseWalletReturn {
 
     const unsubChain = onChainChanged(() => {
       // Re-fetch accounts after chain change
+      if (isDisconnected()) return;
       getAccounts().then((accounts) => {
         if (accounts.length > 0) setAddress(accounts[0]);
       });
@@ -62,6 +84,7 @@ export function useWallet(): UseWalletReturn {
     setError(null);
     try {
       const addr = await connectWallet();
+      setDisconnected(false);
       setAddress(addr);
     } catch (err) {
       setError(getErrorMessage(err));
@@ -71,6 +94,7 @@ export function useWallet(): UseWalletReturn {
   }, []);
 
   const disconnect = useCallback(() => {
+    setDisconnected(true);
     setAddress(null);
     setError(null);
   }, []);

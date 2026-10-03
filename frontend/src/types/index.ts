@@ -52,12 +52,11 @@ export interface RawCaseStatus {
   accused: string;
   rule_number: number;
   rule_title: string;
-  rule_text: string;
   complaint_url: string;
   defense_url: string;          // "" when none
-  defense_window: number;       // seconds
-  appeal_window: number;        // seconds
   opened_at: number;            // unix timestamp
+  /** opened_at + defense_window, computed by the contract */
+  defense_closes_at: number;
   // Lifecycle
   status: 'open' | 'ruled' | 'under_appeal' | 'final';
   // First-instance ruling fields (all default/zero until ruled)
@@ -66,10 +65,14 @@ export interface RawCaseStatus {
   first_summary: string;
   first_reasoning: string;
   ruled_at: number;             // 0 until ruled
+  /** ruled_at + appeal_window, 0 until ruled */
+  appeal_closes_at: number;
   // Appeal
-  appeal_contract: string;      // "" until appeal filed
-  appellant: string;            // "" until appeal filed
+  appeal_contract: string;      // zero address until appeal filed
+  appellant: string;            // zero address until appeal filed
   appealed_at: number;          // 0 until appeal filed
+  /** appealed_at + appeal_window, 0 until appealed */
+  review_closes_at: number;
   // Final outcome
   final_violation: boolean;
   final_severity: number;
@@ -114,10 +117,11 @@ export interface CaseStatus {
   accused: string;
   rule_number: number;
   rule_title: string;
-  rule_text: string;
   // Documents
   complaint_url: string;
   defense_url: string | null;   // null when none
+  /** Lives on the appeal contract; null until an appeal is filed */
+  appeal_grounds_url: string | null;
   // Lifecycle
   status: 'open' | 'ruled' | 'under_appeal' | 'final';
   opened_at: number;            // unix timestamp

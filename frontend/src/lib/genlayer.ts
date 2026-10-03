@@ -4,6 +4,7 @@
 // ============================================================
 
 import { createClient } from 'genlayer-js';
+import type { TransactionHash } from 'genlayer-js/types';
 import { studionet } from 'genlayer-js/chains';
 import type {
   HallConfig,
@@ -42,32 +43,78 @@ function writeClient(senderAddress: `0x${string}`) {
 // Transaction result check
 // ---------------------------------------------------------------------------
 
+/** Poll for up to ~5 minutes: an LLM ruling needs consensus and can be slow. */
+const WAIT_INTERVAL_MS = 3000;
+const WAIT_RETRIES = 100;
+
+/** Statuses where the network gave up without producing a result. */
+const NO_RESULT_STATUSES = ['UNDETERMINED', 'CANCELED', 'LEADER_TIMEOUT', 'VALIDATORS_TIMEOUT'];
+
+type Loose = Record<string, unknown>;
+
+function lastLine(text: string): string {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  return lines.length ? lines[lines.length - 1].slice(0, 300) : '';
+}
+
 /**
- * Wait for a transaction receipt and verify the execution succeeded.
+ * Inspect a decided transaction. ACCEPTED only means validators agreed on
+ * the receipt; the receipt itself can be a contract error ("window has
+ * closed", "only the owner", ...). Returns a message, or null on success.
  *
- * GenLayer distinguishes between acceptance (consensus on the tx) and
- * execution result. A tx can be ACCEPTED even if the contract raised an
- * error (e.g. "window has closed", "only the owner"). We must check
- * txExecutionResultName === 'FINISHED_WITH_RETURN' to confirm success.
+ * Studio receipts carry the result in consensus_data.leader_receipt[].
+ * execution_result, other backends in txExecutionResultName, so both are
+ * checked.
+ */
+export function describeFailure(tx: unknown): string | null {
+  const t = tx as Loose;
+  const status = String(t.statusName ?? t.status ?? '').toUpperCase();
+  if (NO_RESULT_STATUSES.includes(status)) {
+    return `The network did not reach a result (${status.toLowerCase().replace('_', ' ')}).`;
+  }
+  const consensus = (t.consensus_data ?? null) as Loose | null;
+  const raw = consensus?.leader_receipt;
+  const receipts = (Array.isArray(raw) ? raw : raw ? [raw] : []) as Loose[];
+  const failed =
+    t.txExecutionResultName === 'FINISHED_WITH_ERROR' ||
+    receipts.some((r) => String(r.execution_result ?? '').toUpperCase().includes('ERROR'));
+  if (!failed) return null;
+  for (const r of receipts) {
+    const genvm = (r.genvm_result ?? null) as Loose | null;
+    const detail =
+      lastLine(String(genvm?.stderr ?? '')) || lastLine(String(genvm?.stdout ?? ''));
+    if (detail) return `The contract rejected the action: ${detail}`;
+  }
+  return 'The contract rejected the action.';
+}
+
+/**
+ * Wait for a write to be decided and verify it actually succeeded.
+ * If we stop waiting, say so instead of reporting a failure: the
+ * transaction may still go through, and a retry would repeat it.
  */
 async function waitAndCheck(
   client: ReturnType<typeof createClient>,
   txHash: string,
 ): Promise<string> {
-  const receipt = await client.waitForTransactionReceipt({
-    hash: txHash as `0x${string}`,
-  });
-
-  // The receipt shape from genlayer-js — check execution result name
-  const execResult = (receipt as Record<string, unknown>).txExecutionResultName as string | undefined;
-
-  if (execResult !== undefined && execResult !== 'FINISHED_WITH_RETURN') {
-    // Pull out any contract-level error message when available
-    const execErr = (receipt as Record<string, unknown>).txExecutionResult as Record<string, unknown> | undefined;
-    const contractMsg = execErr?.error ?? execErr?.message ?? execResult;
-    throw new Error(`Contract execution failed: ${contractMsg}`);
+  let receipt: unknown;
+  try {
+    receipt = await client.waitForTransactionReceipt({
+      hash: txHash as TransactionHash,
+      interval: WAIT_INTERVAL_MS,
+      retries: WAIT_RETRIES,
+    });
+  } catch (err) {
+    if (err instanceof Error && /timed out/i.test(err.message)) {
+      throw new Error(
+        'The transaction was submitted but is still being processed. ' +
+          'Refresh in a minute before trying again so the action is not repeated.',
+      );
+    }
+    throw err;
   }
-
+  const failure = describeFailure(receipt);
+  if (failure) throw new Error(failure);
   return txHash;
 }
 
@@ -217,12 +264,29 @@ export async function writeFileCase(
 
 /** Fetch full case status — maps raw output to CaseStatus */
 export async function readCaseStatus(caseAddress: `0x${string}`): Promise<CaseStatus> {
-  const result = await readClient.readContract({
+  const result = (await readClient.readContract({
     address: caseAddress,
     functionName: 'get_status',
     args: [],
-  });
-  return mapCaseStatus(result as unknown as RawCaseStatus);
+  })) as unknown as RawCaseStatus;
+
+  // The appeal grounds URL is stored on the appeal contract, not the case.
+  let appeal: { grounds_url?: unknown } | null = null;
+  const appealAddress = /^0x0{40}$/i.test(result.appeal_contract ?? '')
+    ? ''
+    : result.appeal_contract;
+  if (appealAddress) {
+    try {
+      appeal = (await readClient.readContract({
+        address: appealAddress as `0x${string}`,
+        functionName: 'get_status',
+        args: [],
+      })) as unknown as { grounds_url?: unknown };
+    } catch {
+      appeal = null; // the case page still works without the grounds link
+    }
+  }
+  return mapCaseStatus(result, appeal);
 }
 
 /** Check if a ruling can be requested for a case */
