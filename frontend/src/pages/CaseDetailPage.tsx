@@ -31,6 +31,7 @@ import {
   truncateAddress,
   getErrorMessage,
 } from '../lib/genlayer';
+import { validateHttpUrl } from '../lib/validation';
 
 type CaseAction =
   | 'defense' | 'ruling' | 'appeal' | 'finalize' | 'abandon'
@@ -185,6 +186,21 @@ function ActionPanel({
 
   const executeAction = async () => {
     if (!activeAction) return;
+
+    // Same checks the contract makes, so a bad link is caught before the
+    // user signs a transaction that would only be rejected.
+    const url = urlInput.trim();
+    if (activeAction === 'defense' || activeAction === 'appeal') {
+      const problem = validateHttpUrl(
+        url,
+        activeAction === 'defense' ? 'the defense' : 'the appeal grounds',
+      );
+      if (problem) {
+        setActionError(problem);
+        return;
+      }
+    }
+
     setIsLoading(true);
     setActionError(null);
 
@@ -194,7 +210,7 @@ function ActionPanel({
 
       switch (activeAction) {
         case 'defense':
-          await writeCaseSubmitDefense(addr, cAddr, urlInput);
+          await writeCaseSubmitDefense(addr, cAddr, url);
           toastSuccess('Defense Submitted', 'Your defense has been recorded on-chain.');
           break;
         case 'ruling':
@@ -202,7 +218,7 @@ function ActionPanel({
           toastSuccess('Ruling Requested', 'The AI will now deliberate on this case.');
           break;
         case 'appeal':
-          await writeCaseAppeal(addr, cAddr, urlInput);
+          await writeCaseAppeal(addr, cAddr, url);
           toastSuccess('Appeal Filed', 'Use "Run Appeal Review" to start the review. The result applies once finalized.');
           break;
         case 'finalize':

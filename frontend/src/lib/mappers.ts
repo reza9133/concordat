@@ -40,6 +40,8 @@ export function mapStanding(raw: RawStanding): Standing {
     dismissed_complaints: Number(raw.dismissed_filed ?? 0),
     withdrawn_cases: Number(raw.withdrawn_filed ?? 0),
     open_cases: Number(raw.open_filed ?? 0),
+    // Older halls do not report can_file: treat as allowed and let the contract decide.
+    can_file: raw.can_file === undefined ? true : Boolean(raw.can_file),
   };
 }
 

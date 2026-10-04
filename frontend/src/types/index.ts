@@ -43,6 +43,8 @@ export interface RawStanding {
   open_filed?: number;
   /** cases that ended with no verdict (withdrawn or expired); they count towards the filing lockout */
   withdrawn_filed?: number;
+  /** false when the member is suspended or has reached the filing lockout */
+  can_file?: boolean;
 }
 
 /**
@@ -101,6 +103,8 @@ export interface Standing {
   withdrawn_cases: number;
   /** unsettled complaints; capped by the hall's max_dismissed_complaints */
   open_cases: number;
+  /** the contract's own verdict on whether this member may file a case right now */
+  can_file: boolean;
 }
 
 /**

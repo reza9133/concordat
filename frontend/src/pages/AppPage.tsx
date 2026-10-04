@@ -225,6 +225,7 @@ export function AppPage() {
                     <FileCaseForm
                       senderAddress={address!}
                       rules={rules}
+                      maxDismissedComplaints={config?.max_dismissed_complaints ?? null}
                       onSuccess={(txHash, caseAddress) => {
                         success('Case Filed!', `Transaction: ${txHash.slice(0, 20)}…`);
                         refetchCases();

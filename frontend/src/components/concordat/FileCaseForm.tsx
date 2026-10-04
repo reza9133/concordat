@@ -3,19 +3,29 @@
 // ============================================================
 
 import { useState } from 'react';
-import { Scale, User, Hash, Link as LinkIcon } from 'lucide-react';
+import { Scale, User, Hash, Link as LinkIcon, Ban } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { writeFileCase, getErrorMessage } from '../../lib/genlayer';
+import { validateHttpUrl } from '../../lib/validation';
+import { useStanding } from '../../hooks/useContract';
 import type { Rule } from '../../types';
 
 interface FileCaseFormProps {
   senderAddress: string;
   rules: Rule[];
+  /** The hall's max_dismissed_complaints: caps both strikes and unsettled cases */
+  maxDismissedComplaints?: number | null;
   onSuccess?: (txHash: string, caseAddress: string | null) => void;
   onError?: (message: string) => void;
 }
 
-export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileCaseFormProps) {
+export function FileCaseForm({
+  senderAddress,
+  rules,
+  maxDismissedComplaints = null,
+  onSuccess,
+  onError,
+}: FileCaseFormProps) {
   const [accused, setAccused] = useState('');
   const [ruleNumber, setRuleNumber] = useState<string>('');
   const [complaintUrl, setComplaintUrl] = useState('');
@@ -23,6 +33,28 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const activeRules = rules.filter((r) => r.active);
+
+  // The contract refuses a filing from a suspended or locked-out member, and
+  // from one who already has the maximum number of unsettled cases. Say so up
+  // front instead of after the user has signed a transaction. If the standing
+  // cannot be read, nothing is blocked here and the contract decides.
+  const { standing } = useStanding(senderAddress);
+  const maxCases = maxDismissedComplaints !== null ? Number(maxDismissedComplaints) : null;
+
+  let blockedReason: string | null = null;
+  if (standing) {
+    const strikes = standing.dismissed_complaints + standing.withdrawn_cases;
+    if (!standing.can_file) {
+      blockedReason =
+        standing.status === 'suspended'
+          ? 'You are suspended, so you cannot file new cases.'
+          : `You cannot file new cases: your dismissed, withdrawn and expired cases${
+              maxCases !== null ? ` (${strikes} of ${maxCases} allowed)` : ''
+            } have reached the hall's limit. The hall owner can lift this.`;
+    } else if (maxCases !== null && standing.open_cases >= maxCases) {
+      blockedReason = `You already have the maximum number of unsettled cases (${standing.open_cases} of ${maxCases}). Wait for one to settle before filing another.`;
+    }
+  }
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -35,8 +67,9 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
     if (!ruleNumber) {
       newErrors.ruleNumber = 'Please select a rule that was violated';
     }
-    if (!complaintUrl || (!complaintUrl.startsWith('http://') && !complaintUrl.startsWith('https://')) || /^https?:\/\/(localhost|\[|\d+(\.\d+){0,3}(\/|:|\?|#|$))/i.test(complaintUrl)) {
-      newErrors.complaintUrl = 'Enter a valid URL (http:// or https://)';
+    const urlProblem = validateHttpUrl(complaintUrl, 'the complaint');
+    if (urlProblem) {
+      newErrors.complaintUrl = urlProblem;
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -44,7 +77,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (blockedReason || !validate()) return;
 
     setIsSubmitting(true);
     try {
@@ -69,6 +102,13 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {blockedReason && (
+        <div className="flex gap-2.5 p-3.5 rounded-xl bg-danger/10 border border-danger/20">
+          <Ban className="w-[18px] h-[18px] text-danger flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-danger leading-relaxed">{blockedReason}</p>
+        </div>
+      )}
+
       {/* Accused address */}
       <div>
         <label className="block text-sm font-semibold text-text-primary mb-1.5">
@@ -160,6 +200,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
         variant="primary"
         fullWidth
         isLoading={isSubmitting}
+        disabled={blockedReason !== null}
         leftIcon={<Scale className="w-4 h-4" />}
       >
         {isSubmitting ? 'Filing Case…' : 'File Case'}
