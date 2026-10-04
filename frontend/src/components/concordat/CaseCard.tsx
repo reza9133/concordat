@@ -2,11 +2,13 @@
 // CaseCard — card in the case list view
 // ============================================================
 
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Scale, Clock, ArrowRight } from 'lucide-react';
 import { Badge, statusToBadgeVariant, formatStatus } from '../ui/Badge';
-import { truncateAddress } from '../../lib/genlayer';
+import { truncateAddress, readCaseStatus } from '../../lib/genlayer';
+import type { CaseStatus } from '../../types';
 
 interface CaseCardProps {
   address: string;
@@ -15,6 +17,21 @@ interface CaseCardProps {
 
 export function CaseCard({ address, index = 0 }: CaseCardProps) {
   const navigate = useNavigate();
+  const [info, setInfo] = useState<CaseStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    readCaseStatus(address as `0x${string}`)
+      .then((s) => { if (!cancelled) setInfo(s); })
+      .catch(() => { /* keep the placeholder; the detail page reports errors */ });
+    return () => { cancelled = true; };
+  }, [address]);
+
+  const badgeLabel = info
+    ? info.decided_by === 'withdrawn' ? 'Withdrawn'
+      : info.decided_by === 'expired_unruled' ? 'Expired'
+      : formatStatus(info.status)
+    : '…';
 
   return (
     <motion.div
@@ -37,15 +54,15 @@ export function CaseCard({ address, index = 0 }: CaseCardProps) {
             </p>
           </div>
         </div>
-        <Badge variant={statusToBadgeVariant('open')} dot>
-          {formatStatus('open')}
+        <Badge variant={info ? statusToBadgeVariant(info.status) : 'default'} dot>
+          {badgeLabel}
         </Badge>
       </div>
 
       <div className="space-y-1.5 mb-4">
         <div className="flex items-center gap-1.5 text-xs text-text-secondary">
           <Clock className="w-3.5 h-3.5" />
-          <span>Filed recently</span>
+          <span>{info && info.opened_at > 0 ? `Filed ${new Date(info.opened_at * 1000).toLocaleDateString()}` : 'Loading…'}</span>
         </div>
         <p className="text-xs font-mono text-text-secondary truncate">
           {address}

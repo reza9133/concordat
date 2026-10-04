@@ -118,7 +118,7 @@ const SECTIONS: DocSection[] = [
           { n: 3, title: 'Request Ruling', text: 'After the defense window closes (or if a defense was submitted), anyone can call request_ruling(). The GenLayer AI validators read both URLs and reach consensus.' },
           { n: 4, title: 'Ruling Delivered', text: 'The AI returns a verdict (sustained/dismissed), reasoning, and penalty_points. If sustained, the accused\'s standing is updated.' },
           { n: 5, title: 'Appeal Window', text: 'The losing party has appeal_window_seconds to call appeal(grounds_url). This creates a ConcordatAppeal contract for a fresh review.' },
-          { n: 6, title: 'Finalize', text: 'After the appeal window expires, anyone calls finalize() to permanently close the case and commit the final outcome to the hall\'s state.' },
+          { n: 6, title: 'Finalize', text: 'If nobody appeals, anyone calls finalize() after the appeal window to close the case and commit the outcome to the hall\'s state. An appealed case is closed by the appeal result instead, with no finalize() call.' },
         ].map((step) => (
           <div key={step.n} className="flex gap-4 mb-5">
             <div className="w-7 h-7 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -187,6 +187,8 @@ const SECTIONS: DocSection[] = [
             ['appeal(grounds_url)', 'Losing Party', 'Files appeal within appeal window'],
             ['finalize()', 'Anyone', 'Closes case after appeal window expires'],
             ['abandon_appeal()', 'Anyone', 'Drops a stuck appeal'],
+            ['withdraw()', 'Complainant', 'Drops an unruled case while the defense window is open and the accused has not answered; no verdict'],
+            ['expire()', 'Complainant', 'Closes a case still unruled after both windows; no verdict'],
           ]}
         />
       </div>
@@ -320,7 +322,7 @@ appeal(
           },
           {
             title: 'Prompt Injection Protection',
-            text: 'The AI\'s system prompt explicitly ignores any instructions embedded in complaint or defense documents. The AI is told to treat these as raw evidence, not instructions.',
+            text: 'Complaint, defense and grounds pages are quoted between tagged markers, and the AI is told to treat them as raw evidence, never as instructions. Look-alike markers inside a page are stripped, and the real markers carry a tag computed from all the quoted pages together, so a page cannot forge a matching one. This hardens the prompt but is not a guarantee: independent validators re-check every verdict, and rulings can be appealed.',
           },
           {
             title: 'Decentralized Consensus',

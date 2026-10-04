@@ -41,6 +41,8 @@ export interface RawStanding {
   dismissed_filed: number;
   /** complaints filed by the member that are not settled yet */
   open_filed?: number;
+  /** cases that ended with no verdict (withdrawn or expired); they count towards the filing lockout */
+  withdrawn_filed?: number;
 }
 
 /**
@@ -80,7 +82,9 @@ export interface RawCaseStatus {
   final_severity: number;
   final_summary: string;
   final_reasoning: string;
-  decided_by: string;           // "" | "first_instance" | "appeal" | "first_instance_appeal_abandoned"
+  // "" | "first_instance" | "appeal" | "first_instance_appeal_abandoned"
+  // | "withdrawn" | "expired_unruled"  (the last two carry no verdict)
+  decided_by: string;
 }
 
 // ---- Mapped / UI types ----
@@ -93,6 +97,8 @@ export interface Standing {
   points: number;
   status: 'good' | 'probation' | 'suspended';
   dismissed_complaints: number;
+  /** withdrawn or expired cases; these count towards the filing lockout like dismissals */
+  withdrawn_cases: number;
   /** unsettled complaints; capped by the hall's max_dismissed_complaints */
   open_cases: number;
 }

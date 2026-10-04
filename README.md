@@ -52,9 +52,28 @@ together and only the first one is deployed by hand.
    its finalization message and must not be thrown away. An unreadable
    *complaint* page still makes the ruling fail and can be retried; it blocks
    only the complainant.
-   **Evidence is pinned.** The ruling stores a hash of the complaint and defense
-   pages it read. If either page has changed (or died) by the time of an appeal,
-   the first ruling stands instead of being re-judged on edited material.
+   **Evidence is stored, not just hashed.** The ruling stores the text of the
+   complaint and defense pages it read (up to 6000 characters each, readable with
+   `get_evidence()`), and the appeal reviews that stored snapshot. The live
+   complaint and defense pages are never consulted again, so a party cannot cancel
+   or steer an appeal by editing their own page after the ruling; only the
+   appellant's grounds page is read at appeal time. Digests in `get_status()` are
+   computed from the stored text.
+   **Validators verify the snapshot.** The leader does not get to choose the
+   evidence: every validator reads the pages itself and rejects the ruling if its
+   own read differs from the leader's snapshot in any ordinary word, or in more
+   than 1% of the words (never fewer than 4) even when only numbers differ. Only
+   words that contain a digit on both sides may differ (a clock, a counter), and
+   the word count must match, so deleting, inserting or swapping a word such as
+   "not" is never noise; the validators also reject the ruling if the leader claims a defense was unreadable
+   but the validator can read it, or if the leader quotes a page the validator
+   cannot see. The tolerance cannot be zero, because real pages carry a clock or
+   a counter, so a leader could still alter a few numbers in a page (never a
+   word). For a page cut at the 6000-character cap, the last 3 words are not
+   compared, because a counter that gains a digit moves the cut; use a stable page (a gist at a fixed revision, an archive link) for anything that matters. A page that changes more than
+   that between two reads is not stable enough to pin: a complaint page like that
+   makes the ruling fail with a clear error, a defense page like that counts as
+   unreadable (so it cannot stall the case).
 8. **Outcome.** If nobody appeals, anyone can call `finalize()` after the
    window. Either way the case sends `report_final` to the hall, which updates
    standings:
@@ -62,7 +81,14 @@ together and only the first one is deployed by hand.
    - complaint dismissed: the complainant gains one dismissed complaint
    - `probation` and `suspended` labels follow the point thresholds
    - suspended members, and members with too many dismissed complaints, cannot
-     file new cases; the owner can grant amnesty with `forgive_points`
+     file new cases; the owner can grant amnesty with `forgive_points` (lifts
+     suspension) and `forgive_dismissals` (lifts the dismissed-complaint lockout)
+   - a case that never reaches a ruling frees its complainant's slot without any
+     verdict: the complainant can `withdraw()` it while the defense window is open and the accused has not answered,
+     and the complainant can `expire()` it once it has been open longer than both windows (not anyone:
+     otherwise the accused could wait out the windows and escape a ruling; `request_ruling()` stays open to
+     everyone until then). Both count as a strike towards the same filing lockout as dismissed
+     complaints, so filing and withdrawing in a loop ends in a lockout; `forgive_dismissals` lifts both
    - a member can have at most `max_dismissed_complaints` unsettled cases open
      at once, so the lockout cannot be dodged by filing a swarm of cases first
 
@@ -186,12 +212,19 @@ Notes:
   contracts accept an address or a string, so both forms work.
 - Use two or three different accounts: owner, complainant and accused. Each
   role is enforced on-chain.
-- Evidence URLs must be plain, public pages that name a domain (no IP
-  addresses, `localhost`, intranet or `.local` hosts, or embedded credentials)
-  and that validators can fetch. Use pages that will not change after filing,
-  such as a gist at a fixed revision or an archive link: the ruling pins a hash
-  of the page, so a page edited afterwards makes any appeal fall back to the
-  first ruling. Only the first 6000 characters of each page are read.
+- Evidence URLs must be plain, public pages that name a domain on the default
+  http(s) port (no IP addresses, `localhost`, intranet or `.local`/`.internal`
+  hosts, names that embed an IP such as `127.0.0.1.nip.io` or
+  `10-0-0-1.example.org`, or embedded credentials; a name that merely contains
+  digits, such as `my-1-2-3-4-app.vercel.app`, is fine) and that validators can fetch. This is a first filter only: a
+  contract cannot resolve DNS, so the validators' web module stays the final
+  authority on what may be fetched. A page that renders blank is rejected as
+  having no readable text instead of being ruled on as "nothing happened". Use pages that are stable while the ruling
+  is being made, such as a gist at a fixed revision or an archive link. Pages
+  with a little dynamic noise (a clock, a counter) are tolerated; heavily dynamic
+  pages are not. Editing a page after the ruling has no effect on an appeal
+  because the appeal uses the stored snapshot. Only the first 6000 characters of
+  each page are read.
 - Both windows must be between 60 seconds and one year. Keep them longer than
   the network finality window so results can arrive before a window closes.
 - Outcomes reach the hall through `on="finalized"` messages, so standings
@@ -215,8 +248,10 @@ case and appeal contract by its address to call its methods the same way.
 | `add_rule(title, text)` | owner | Add a rule, returns its number |
 | `retire_rule(rule_number)` | owner | Stop accepting new cases for a rule |
 | `forgive_points(member, points)` | owner | Amnesty (points must be >= 0), never below zero |
+| `forgive_dismissals(member, count)` | owner | Lower a member's dismissed-complaint count (count >= 0), never below zero |
 | `file_case(accused, rule_number, complaint_url)` | anyone allowed to file | Deploys a case, returns its address |
 | `report_final(violation, severity)` | cases only | Settles a case and updates standings |
+| `report_withdrawn()` | cases only | Frees the complainant's slot for a case that ended without a verdict |
 | `get_config`, `get_rules`, `get_standing`, `get_case`, `get_cases`, `get_case_count` | anyone | Read state |
 
 **ConcordatCase**
@@ -227,6 +262,8 @@ case and appeal contract by its address to call its methods the same way.
 | `request_ruling()` | anyone | First-instance ruling |
 | `appeal(grounds_url)` | losing party | Deploys the appeal contract |
 | `finalize()` | anyone | Close an unappealed case after the window |
+| `withdraw()` | complainant | Drop the complaint while the defense window is open and the accused has not answered |
+| `expire()` | complainant | Close a case that is still unruled after both windows have passed |
 | `abandon_appeal()` | anyone | Close an appealed case with the first ruling if the review produced nothing within one appeal window |
 | `receive_appeal_result(...)` | its appeal only | Close an appealed case |
 | `get_status`, `can_request_ruling` | anyone | Read state |
@@ -247,7 +284,18 @@ case and appeal contract by its address to call its methods the same way.
   leader; shared external failures (a page returning an error) are agreed on.
 - **Prompt injection.** Complaint, defense and grounds pages are quoted
   between explicit markers and the model is told never to follow
-  instructions inside them. Verdicts are structured, clamped to the 0-3
+  instructions inside them. Markers imitated inside a page (including with
+  zero-width characters or without a separator) are removed on a best-effort
+  basis. The real markers also carry a tag that is a digest of *all* the
+  quoted pages together, so a page that contains a forged marker changes the
+  tag that marker would need; a matching forgery would take a hash
+  fixed-point search. This hardens the markers only. It does not make the
+  model immune: a page can still try to confuse the reviewer in ways no
+  filter foresees, which is why the verdict is also checked by independent
+  validators and can be appealed. Validators also check every decision's shape
+  and consistency (boolean verdict, severity 0-3 matching the verdict, bounded
+  text), and on an appeal that stands they require the outcome to equal the
+  first ruling exactly. Verdicts are structured, clamped to the 0-3
   scale, and a violation can never carry severity 0.
 - **One appeal per case.** There is no second appeal and no value transfer;
   the project moves reputation, not funds.

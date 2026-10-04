@@ -276,13 +276,32 @@ export async function writeForgivePoints(
   return waitAndCheck(wc, txHash);
 }
 
-/** File a new case against an accused */
+/** Forgive dismissed complaints (lifts the filing lockout) — owner only */
+export async function writeForgiveDismissals(
+  senderAddress: `0x${string}`,
+  member: string,
+  count: number,
+): Promise<string> {
+  const wc = writeClient(senderAddress);
+  const txHash = await sendWrite(wc, {
+    address: CONTRACT_ADDRESS,
+    functionName: 'forgive_dismissals',
+    args: [member, count],
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  return waitAndCheck(wc, txHash);
+}
+
+/**
+ * File a new case against an accused. Returns the transaction hash and, when
+ * it can be found, the address of the case contract the hall deployed.
+ */
 export async function writeFileCase(
   senderAddress: `0x${string}`,
   accused: string,
   ruleNumber: number,
   complaintUrl: string,
-): Promise<string> {
+): Promise<{ txHash: string; caseAddress: string | null }> {
   const wc = writeClient(senderAddress);
   const txHash = await sendWrite(wc, {
     address: CONTRACT_ADDRESS,
@@ -290,7 +309,29 @@ export async function writeFileCase(
     args: [accused, ruleNumber, complaintUrl],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);
-  return waitAndCheck(wc, txHash);
+  await waitAndCheck(wc, txHash);
+  return { txHash, caseAddress: await findFiledCase(senderAddress, complaintUrl) };
+}
+
+/** Look through the newest cases for the one this member just filed. */
+async function findFiledCase(complainant: string, complaintUrl: string): Promise<string | null> {
+  try {
+    const total = Number(await readGetCaseCount());
+    const start = Math.max(0, total - 10);
+    const recent = await readGetCases(start, total - start);
+    for (const address of [...recent].reverse()) {
+      const status = await readCaseStatus(address as `0x${string}`);
+      if (
+        status.complainant.toLowerCase() === complainant.toLowerCase() &&
+        status.complaint_url === complaintUrl
+      ) {
+        return address;
+      }
+    }
+  } catch {
+    /* the case was filed; only the shortcut to its page is lost */
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +450,58 @@ export async function writeCaseAbandonAppeal(
   const txHash = await sendWrite(wc, {
     address: caseAddress,
     functionName: 'abandon_appeal',
+    args: [],
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  return waitAndCheck(wc, txHash);
+}
+
+/**
+ * Withdraw a case that has not been ruled on — complainant only, and only
+ * while the defense window is open and the accused has not answered.
+ * No verdict is recorded.
+ */
+export async function writeCaseWithdraw(
+  senderAddress: `0x${string}`,
+  caseAddress: `0x${string}`,
+): Promise<string> {
+  const wc = writeClient(senderAddress);
+  const txHash = await sendWrite(wc, {
+    address: caseAddress,
+    functionName: 'withdraw',
+    args: [],
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  return waitAndCheck(wc, txHash);
+}
+
+/** Close a case that is still unruled after both windows — complainant only */
+export async function writeCaseExpire(
+  senderAddress: `0x${string}`,
+  caseAddress: `0x${string}`,
+): Promise<string> {
+  const wc = writeClient(senderAddress);
+  const txHash = await sendWrite(wc, {
+    address: caseAddress,
+    functionName: 'expire',
+    args: [],
+    value: 0n,
+  } as Parameters<typeof wc.writeContract>[0]);
+  return waitAndCheck(wc, txHash);
+}
+
+/**
+ * Run the appeal review — anyone can call, once. This targets the
+ * ConcordatAppeal contract (the case's `appeal_contract`), not the case.
+ */
+export async function writeAppealReview(
+  senderAddress: `0x${string}`,
+  appealAddress: `0x${string}`,
+): Promise<string> {
+  const wc = writeClient(senderAddress);
+  const txHash = await sendWrite(wc, {
+    address: appealAddress,
+    functionName: 'review',
     args: [],
     value: 0n,
   } as Parameters<typeof wc.writeContract>[0]);

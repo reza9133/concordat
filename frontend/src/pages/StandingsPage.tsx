@@ -14,7 +14,7 @@ import { ToastContainer } from '../components/ui/Toast';
 import { useWallet } from '../hooks/useWallet';
 import { useStanding, useHallConfig } from '../hooks/useContract';
 import { useToast } from '../hooks/useToast';
-import { writeForgivePoints, getErrorMessage } from '../lib/genlayer';
+import { writeForgivePoints, writeForgiveDismissals, getErrorMessage } from '../lib/genlayer';
 
 export function StandingsPage() {
   const { address: walletAddress, isConnected } = useWallet();
@@ -26,6 +26,8 @@ export function StandingsPage() {
   const [lookedUpAddress, setLookedUpAddress] = useState('');
   const [forgiveAmount, setForgiveAmount] = useState('');
   const [isForgiving, setIsForgiving] = useState(false);
+  const [dismissalAmount, setDismissalAmount] = useState('');
+  const [isForgivingDismissals, setIsForgivingDismissals] = useState(false);
 
   const isOwner = config && walletAddress
     ? config.owner.toLowerCase() === walletAddress.toLowerCase()
@@ -62,6 +64,24 @@ export function StandingsPage() {
       toastError('Failed to Forgive Points', getErrorMessage(err));
     } finally {
       setIsForgiving(false);
+    }
+  };
+
+  const handleForgiveDismissals = async () => {
+    if (!walletAddress || !lookedUpAddress || !dismissalAmount) return;
+    const count = parseInt(dismissalAmount);
+    if (isNaN(count) || count <= 0) return;
+
+    setIsForgivingDismissals(true);
+    try {
+      await writeForgiveDismissals(walletAddress as `0x${string}`, lookedUpAddress, count);
+      success('Dismissals Forgiven', `${count} dismissed complaint(s) cleared for ${lookedUpAddress.slice(0, 10)}…`);
+      lookup(lookedUpAddress);
+      setDismissalAmount('');
+    } catch (err) {
+      toastError('Failed to Forgive Dismissals', getErrorMessage(err));
+    } finally {
+      setIsForgivingDismissals(false);
     }
   };
 
@@ -220,6 +240,43 @@ export function StandingsPage() {
                       isLoading={isForgiving}
                       onClick={handleForgive}
                       disabled={!forgiveAmount || parseInt(forgiveAmount) <= 0}
+                    >
+                      Forgive
+                    </Button>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* Forgive dismissed complaints (owner only) - lifts the filing lockout */}
+            {isOwner && isConnected && (
+              <Card>
+                <CardHeader>
+                  <h3 className="font-semibold text-text-primary flex items-center gap-2">
+                    <Eraser className="w-4 h-4 text-secondary" />
+                    Forgive Dismissed Complaints (Owner)
+                  </h3>
+                </CardHeader>
+                <CardBody>
+                  <p className="text-sm text-text-secondary mb-3">
+                    Lowers the dismissed-complaint count, which lifts the filing lockout. Forgiving
+                    points does not do this.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={standing.dismissed_complaints}
+                      value={dismissalAmount}
+                      onChange={(e) => setDismissalAmount(e.target.value)}
+                      placeholder="Dismissals to forgive"
+                      className="flex-1 px-3 py-2.5 rounded-xl border border-border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    />
+                    <Button
+                      variant="secondary"
+                      isLoading={isForgivingDismissals}
+                      onClick={handleForgiveDismissals}
+                      disabled={!dismissalAmount || parseInt(dismissalAmount) <= 0}
                     >
                       Forgive
                     </Button>

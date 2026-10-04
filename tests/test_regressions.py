@@ -77,3 +77,9 @@ def test_abandon_appeal_needs_an_appeal(case, direct_vm, direct_alice):
     direct_vm.sender = direct_alice
     with direct_vm.expect_revert("no appeal is pending"):
         case.abandon_appeal()
+
+
+def test_percent_encoded_host_is_rejected(case, direct_vm, direct_bob):
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("percent-encode"):
+        case.submit_defense("http://127.0.0.%31/x")

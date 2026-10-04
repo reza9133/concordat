@@ -9,6 +9,13 @@ type CaseStatusValue = 'open' | 'ruled' | 'under_appeal' | 'final';
 
 interface CaseTimelineProps {
   currentStatus: CaseStatusValue;
+  /**
+   * Whether the case ever reached a first-instance ruling. A case that was
+   * withdrawn or expired unruled goes from "open" straight to "final".
+   */
+  wasRuled?: boolean;
+  /** Whether an appeal was ever filed (it stays true after an abandoned appeal). */
+  wasAppealed?: boolean;
 }
 
 const STAGES = [
@@ -56,12 +63,22 @@ const STAGES = [
 
 const STATUS_ORDER: CaseStatusValue[] = ['open', 'ruled', 'under_appeal', 'final'];
 
-function getStageState(stageKey: CaseStatusValue, currentStatus: CaseStatusValue) {
-  // Special case: if current is 'ruled' (no appeal path taken), skip under_appeal as completed
+function getStageState(
+  stageKey: CaseStatusValue,
+  currentStatus: CaseStatusValue,
+  wasRuled: boolean,
+  wasAppealed: boolean,
+) {
   const currentIdx = STATUS_ORDER.indexOf(currentStatus);
   const stageIdx = STATUS_ORDER.indexOf(stageKey);
 
-  if (currentStatus !== 'under_appeal' && currentStatus !== 'final' && stageKey === 'under_appeal') {
+  // A stage the case never went through is "skipped", not "completed":
+  // - no appeal was filed (still open/ruled, or finalized without an appeal)
+  // - no ruling was issued (withdrawn or expired while open)
+  if (stageKey === 'under_appeal' && currentStatus !== 'under_appeal' && !wasAppealed) {
+    return 'skipped';
+  }
+  if (stageKey === 'ruled' && currentStatus === 'final' && !wasRuled) {
     return 'skipped';
   }
 
@@ -70,7 +87,7 @@ function getStageState(stageKey: CaseStatusValue, currentStatus: CaseStatusValue
   return 'pending';
 }
 
-export function CaseTimeline({ currentStatus }: CaseTimelineProps) {
+export function CaseTimeline({ currentStatus, wasRuled = true, wasAppealed = false }: CaseTimelineProps) {
   return (
     <div className="relative">
       {/* Connector line */}
@@ -78,7 +95,7 @@ export function CaseTimeline({ currentStatus }: CaseTimelineProps) {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-2 relative">
         {STAGES.map((stage, idx) => {
-          const state = getStageState(stage.key, currentStatus);
+          const state = getStageState(stage.key, currentStatus, wasRuled, wasAppealed);
           const Icon = stage.icon;
           const isActive = state === 'active';
           const isCompleted = state === 'completed';
@@ -136,6 +153,11 @@ export function CaseTimeline({ currentStatus }: CaseTimelineProps) {
                 {isActive && (
                   <p className="text-xs text-text-secondary mt-0.5 leading-tight">
                     {stage.description}
+                  </p>
+                )}
+                {state === 'skipped' && (
+                  <p className="text-xs text-text-secondary/60 mt-0.5 leading-tight">
+                    Skipped
                   </p>
                 )}
               </div>

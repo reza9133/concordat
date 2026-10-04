@@ -125,9 +125,9 @@ const STEPS = [
     title: 'Final Outcome & Reputation',
     tagline: 'Results recorded forever',
     description:
-      'Once the appeal window expires without challenge, or after the appeal ruling, anyone can call finalize() to close the case. The final ruling\'s penalty points are applied to the accused\'s standing, affecting their community reputation.',
+      'If nobody appeals, anyone can call finalize() once the appeal window has passed. If the case was appealed, the appeal review reports its result to the case automatically when the network finalizes it, and no finalize() call is needed. Either way, the final ruling\'s penalty points are applied to the accused\'s standing, affecting their community reputation.',
     details: [
-      'Call finalize() after appeal window',
+      'Call finalize() after the appeal window if nobody appealed',
       'Penalty points applied to accused standing',
       'Status updated: good → probation → suspended',
       'Case permanently archived on-chain',

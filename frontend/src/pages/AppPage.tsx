@@ -3,6 +3,7 @@
 // ============================================================
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Wallet, Scale, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
@@ -54,6 +55,7 @@ export function AppPage() {
   } = useCases();
   const { toasts, dismiss, success, error: toastError } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('cases');
+  const navigate = useNavigate();
 
   const isOwner = config && address
     ? config.owner.toLowerCase() === address.toLowerCase()
@@ -223,10 +225,11 @@ export function AppPage() {
                     <FileCaseForm
                       senderAddress={address!}
                       rules={rules}
-                      onSuccess={(txHash) => {
+                      onSuccess={(txHash, caseAddress) => {
                         success('Case Filed!', `Transaction: ${txHash.slice(0, 20)}…`);
                         refetchCases();
                         setActiveTab('cases');
+                        if (caseAddress) navigate(`/cases/${caseAddress}`);
                       }}
                       onError={(msg) => toastError('Failed to File Case', msg)}
                     />

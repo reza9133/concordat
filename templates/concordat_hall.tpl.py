@@ -32,6 +32,7 @@ from dataclasses import dataclass
 import base64
 import hashlib
 import ipaddress
+import re
 import typing
 from urllib.parse import urlsplit
 
@@ -54,29 +55,86 @@ def _addr(value) -> Address:
 
 
 MAX_URL_CHARS = 1000
-_LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+_LOCAL_SUFFIXES = (
+    ".localhost", ".local", ".internal", ".lan", ".home.arpa", ".localdomain",
+    ".corp", ".intranet", ".private", ".test", ".invalid",
+)
+# Public wildcard-DNS services resolve a name such as 127.0.0.1.nip.io to the
+# address written inside it, which would smuggle a private IP past a name check.
+_WILDCARD_DNS = (
+    "nip.io", "sslip.io", "xip.io", "traefik.me", "localtest.me", "lvh.me",
+    "vcap.me", "lacolhost.com", "1u.ms",
+)
+# A dashed IPv4 only counts when it forms a whole label (optionally behind the
+# ip-/ec2- prefixes cloud providers use), e.g. 10-0-0-1.example.org or
+# ec2-10-0-0-1.compute.example.com. A label that merely CONTAINS four numbers,
+# such as my-1-2-3-4-app.vercel.app, is an ordinary name.
+_DASHED_IPV4_LABEL_RE = re.compile(r"^(?:ip-|ec2-)?([0-9]{1,3})-([0-9]{1,3})-([0-9]{1,3})-([0-9]{1,3})$")
+
+
+def _encodes_ipv4(labels) -> bool:
+    """True when a hostname spells an IPv4 address (dotted, or as one dashed label)."""
+
+    def octet(label: str) -> bool:
+        return label.isascii() and label.isdigit() and len(label) <= 3 and int(label) <= 255
+
+    for i in range(len(labels) - 3):  # four consecutive numeric labels: 1.2.3.4.example.org
+        if all(octet(label) for label in labels[i : i + 4]):
+            return True
+    for label in labels:
+        match = _DASHED_IPV4_LABEL_RE.match(label)
+        if match and all(int(part) <= 255 for part in match.groups()):
+            return True
+    return False
+
+
+_HEX_LABEL_RE = re.compile(r"^0x[0-9a-f]+$")
 
 
 def _require_http_url(url: str, what: str) -> None:
-    """Accept only public-looking http(s) URLs that name a domain."""
+    """
+    Accept only public-looking http(s) URLs that name a domain on a standard
+    port. This is a first filter, not a guarantee: a contract cannot resolve
+    DNS, so the validators' web module remains the final authority on what may
+    be fetched.
+    """
     if not isinstance(url, str) or len(url) > MAX_URL_CHARS:
         raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must be an http(s) URL of at most {MAX_URL_CHARS} characters")
-    parts = urlsplit(url)
+    if any(ord(ch) <= 32 or ord(ch) == 127 or ch == "\\" for ch in url):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must not contain spaces, control characters or backslashes")
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} is not a valid http(s) URL")
     host = (parts.hostname or "").lower().rstrip(".")
     if parts.scheme not in ("http", "https") or host == "":
         raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must be an http(s) URL")
+    if "%" in host:
+        # A percent-escaped host such as 127.0.0.%31 may be decoded by the
+        # fetcher into an address this filter would have refused.
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must not percent-encode its host name")
     if parts.username is not None or parts.password is not None:
         raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must not contain credentials")
-    is_ip = True
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        is_ip = False
-    tld = host.rsplit(".", 1)[-1]
-    if tld.isdigit() or tld.startswith("0x"):
+    if port not in (None, 80, 443):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must use the default http(s) port")
+    is_ip = ":" in host  # IPv6 literals, with or without a zone id
+    if not is_ip:
+        try:
+            ipaddress.ip_address(host)
+            is_ip = True
+        except ValueError:
+            pass
+    labels = host.split(".")
+    tld = labels[-1]
+    if tld.isdigit() or any(_HEX_LABEL_RE.match(label) for label in labels):
         is_ip = True  # dotted/hex shorthand such as 127.1 or 0x7f.1
     if is_ip:
         raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must use a domain name, not an IP address")
+    if _encodes_ipv4(labels) or any(
+        host == suffix or host.endswith("." + suffix) for suffix in _WILDCARD_DNS
+    ):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must not use a name that encodes an IP address")
     if host == "localhost" or "." not in host or host.endswith(_LOCAL_SUFFIXES):
         raise gl.vm.UserError(f"{ERR_EXPECTED} {what} must point at a public website")
 
@@ -101,6 +159,7 @@ class Standing:
     points: u32
     upheld_against: u32
     dismissed_filed: u32
+    withdrawn_filed: u32  # cases that ended with no verdict (withdrawn or expired)
     cases_filed: u32
     open_filed: u32  # complaints filed by this member that are not settled yet
 
@@ -111,7 +170,7 @@ class CaseRecord:
     complainant: Address
     accused: Address
     rule_number: u32
-    status: str  # "pending" | "upheld" | "dismissed"
+    status: str  # "pending" | "upheld" | "dismissed" | "withdrawn"
     severity: u8
 
 
@@ -203,6 +262,23 @@ class ConcordatHall(gl.Contract):
         standing = self._standing(_addr(member))
         current = int(standing.points)
         standing.points = u32(current - points if current > points else 0)
+
+    @gl.public.write
+    def forgive_dismissals(self, member: str, count: int) -> None:
+        """
+        Amnesty for the filing lockout: lower a member's dismissed-complaint
+        count, never below zero. (forgive_points only touches suspension.)
+        """
+        self._only_owner()
+        if count < 0:
+            raise gl.vm.UserError("[EXPECTED] dismissals to forgive must not be negative")
+        standing = self._standing(_addr(member))
+        current = int(standing.dismissed_filed)
+        standing.dismissed_filed = u32(current - count if current > count else 0)
+        # Withdrawals count towards the same lockout, so amnesty lifts them too.
+        left = count - current if count > current else 0
+        withdrawn = int(standing.withdrawn_filed)
+        standing.withdrawn_filed = u32(withdrawn - left if withdrawn > left else 0)
 
     def _only_owner(self) -> None:
         if gl.message.sender_address != self.owner:
@@ -319,6 +395,29 @@ class ConcordatHall(gl.Contract):
             complainant.dismissed_filed = u32(complainant.dismissed_filed + 1)
 
     # ------------------------------------------------------------------
+    # Called (as an internal message) by a case that ended with NO verdict:
+    # the complainant withdrew it, or it expired unruled. It only frees the
+    # complainant's unsettled-case slot; no points or dismissals change hands.
+    # ------------------------------------------------------------------
+    @gl.public.write
+    def report_withdrawn(self) -> None:
+        case_address = gl.message.sender_address
+        if case_address not in self.cases:
+            raise gl.vm.UserError("[EXPECTED] unknown case reporting an outcome")
+        record = self.cases[case_address]
+        if record.status != "pending":
+            raise gl.vm.UserError("[EXPECTED] this case has already been settled")
+
+        filer = self._standing(record.complainant)
+        if filer.open_filed > 0:
+            filer.open_filed = u32(filer.open_filed - 1)
+        # No points and no dismissal, but the filing is remembered: otherwise a
+        # member could file and withdraw forever (each round deploys a case).
+        filer.withdrawn_filed = u32(filer.withdrawn_filed + 1)
+        record.status = "withdrawn"
+        record.severity = u8(0)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
     def _standing(self, member: Address) -> Standing:
@@ -327,6 +426,7 @@ class ConcordatHall(gl.Contract):
                 points=u32(0),
                 upheld_against=u32(0),
                 dismissed_filed=u32(0),
+                withdrawn_filed=u32(0),
                 cases_filed=u32(0),
                 open_filed=u32(0),
             )
@@ -350,7 +450,8 @@ class ConcordatHall(gl.Contract):
         standing = self.standings[member]
         if self._label(int(standing.points)) == "suspended":
             return False
-        return standing.dismissed_filed < self.max_dismissed_complaints
+        strikes = int(standing.dismissed_filed) + int(standing.withdrawn_filed)
+        return strikes < self.max_dismissed_complaints
 
     # ------------------------------------------------------------------
     # Read methods
@@ -392,6 +493,7 @@ class ConcordatHall(gl.Contract):
                 "points": 0,
                 "upheld_against": 0,
                 "dismissed_filed": 0,
+                "withdrawn_filed": 0,
                 "cases_filed": 0,
                 "open_filed": 0,
                 "label": "good_standing",
@@ -402,6 +504,7 @@ class ConcordatHall(gl.Contract):
             "points": standing.points,
             "upheld_against": standing.upheld_against,
             "dismissed_filed": standing.dismissed_filed,
+            "withdrawn_filed": standing.withdrawn_filed,
             "cases_filed": standing.cases_filed,
             "open_filed": standing.open_filed,
             "label": self._label(int(standing.points)),

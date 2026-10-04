@@ -7,7 +7,7 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Scale, User, FileText, Gavel, Shield, AlertCircle,
-  ExternalLink, RefreshCw, Link as LinkIcon,
+  ExternalLink, RefreshCw, Link as LinkIcon, Play, Undo2, Hourglass,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
@@ -17,7 +17,7 @@ import { ContractAddress } from '../components/ui/ContractAddress';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { ToastContainer } from '../components/ui/Toast';
 import { useWallet } from '../hooks/useWallet';
-import { useCaseStatus } from '../hooks/useContract';
+import { useCaseStatus, useHallConfig } from '../hooks/useContract';
 import { useToast } from '../hooks/useToast';
 import {
   writeCaseSubmitDefense,
@@ -25,11 +25,16 @@ import {
   writeCaseAppeal,
   writeCaseFinalize,
   writeCaseAbandonAppeal,
+  writeCaseWithdraw,
+  writeCaseExpire,
+  writeAppealReview,
   truncateAddress,
   getErrorMessage,
 } from '../lib/genlayer';
 
-type CaseAction = 'defense' | 'ruling' | 'appeal' | 'finalize' | 'abandon';
+type CaseAction =
+  | 'defense' | 'ruling' | 'appeal' | 'finalize' | 'abandon'
+  | 'review' | 'withdraw' | 'expire';
 
 function InfoRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -47,12 +52,15 @@ function ActionPanel({
   senderAddress,
   canRequestRuling,
   caseStatus,
+  appealWindowSeconds,
   onSuccess,
 }: {
   caseAddress: string;
   senderAddress: string;
   canRequestRuling: boolean;
   caseStatus: ReturnType<typeof useCaseStatus>['status'];
+  /** The hall's appeal window; null until the hall config has loaded */
+  appealWindowSeconds: number | null;
   onSuccess: () => void;
 }) {
   const [activeAction, setActiveAction] = useState<CaseAction | null>(null);
@@ -69,7 +77,7 @@ function ActionPanel({
   const now = Math.floor(Date.now() / 1000);
 
   // Determine available actions based on correctly mapped CaseStatus fields
-  const actions: { key: CaseAction; label: string; icon: React.ElementType; condition: boolean; needsUrl: boolean; urlLabel?: string; urlPlaceholder?: string }[] = [
+  const actions: { key: CaseAction; label: string; icon: React.ElementType; condition: boolean; needsUrl: boolean; urlLabel?: string; urlPlaceholder?: string; hint?: string }[] = [
     {
       key: 'defense',
       label: 'Submit Defense',
@@ -132,6 +140,45 @@ function ActionPanel({
         && now >= (caseStatus.review_closes_at ?? 0),
       needsUrl: false,
     },
+    {
+      key: 'review',
+      label: 'Run Appeal Review',
+      icon: Play,
+      // Anyone may trigger the review, once. It runs on the appeal contract.
+      // Without this the appeal is never decided and can only be abandoned.
+      condition: status === 'under_appeal'
+        && !caseStatus.appeal_decided
+        && caseStatus.appeal_contract !== null,
+      needsUrl: false,
+      hint: 'Starts the appeal review. Anyone can do this, once. The result applies after the network finalizes it.',
+    },
+    {
+      key: 'withdraw',
+      label: 'Withdraw Case',
+      icon: Undo2,
+      // Complainant only, only while the accused has not answered and the
+      // defense window is still open. The contract refuses otherwise.
+      condition: status === 'open'
+        && isComplainant
+        && !caseStatus.defense_url
+        && now < caseStatus.defense_closes_at,
+      needsUrl: false,
+      hint: 'Drops this complaint with no verdict: no points are given and nothing counts as dismissed, but it counts as a strike towards the filing lockout. Only possible while the defense window is open and the accused has not answered. This cannot be undone.',
+    },
+    {
+      key: 'expire',
+      label: 'Expire Case',
+      icon: Hourglass,
+      // Only the complainant can close an unruled case, once both windows have
+      // passed (opened_at + defense window + appeal window). The case does not
+      // report the appeal window, so it comes from the hall config.
+      condition: status === 'open'
+        && isComplainant
+        && appealWindowSeconds !== null
+        && now >= caseStatus.defense_closes_at + appealWindowSeconds,
+      needsUrl: false,
+      hint: 'Closes a case that never reached a ruling (for example because the complaint page is unreadable). No verdict is recorded, and it counts as a strike towards the filing lockout.',
+    },
   ];
 
   const visibleActions = actions.filter((a) => a.condition);
@@ -156,7 +203,7 @@ function ActionPanel({
           break;
         case 'appeal':
           await writeCaseAppeal(addr, cAddr, urlInput);
-          toastSuccess('Appeal Filed', 'Anyone can now trigger its review. The result applies once finalized.');
+          toastSuccess('Appeal Filed', 'Use "Run Appeal Review" to start the review. The result applies once finalized.');
           break;
         case 'finalize':
           await writeCaseFinalize(addr, cAddr);
@@ -165,6 +212,19 @@ function ActionPanel({
         case 'abandon':
           await writeCaseAbandonAppeal(addr, cAddr);
           toastSuccess('Appeal Abandoned', 'The appeal has been dropped.');
+          break;
+        case 'review':
+          if (!caseStatus.appeal_contract) throw new Error('This case has no appeal contract yet.');
+          await writeAppealReview(addr, caseStatus.appeal_contract as `0x${string}`);
+          toastSuccess('Review Complete', 'The appeal review has a result. It applies once the network finalizes it.');
+          break;
+        case 'withdraw':
+          await writeCaseWithdraw(addr, cAddr);
+          toastSuccess('Case Withdrawn', 'The complaint was dropped without a verdict.');
+          break;
+        case 'expire':
+          await writeCaseExpire(addr, cAddr);
+          toastSuccess('Case Expired', 'The unruled case was closed without a verdict.');
           break;
       }
       setActiveAction(null);
@@ -212,6 +272,12 @@ function ActionPanel({
               animate={{ opacity: 1, height: 'auto' }}
               className="space-y-3"
             >
+              {visibleActions.find((a) => a.key === activeAction)?.hint && (
+                <p className="text-sm text-text-secondary">
+                  {visibleActions.find((a) => a.key === activeAction)?.hint}
+                </p>
+              )}
+
               {visibleActions.find((a) => a.key === activeAction)?.needsUrl && (
                 <div>
                   <label className="block text-sm font-medium text-text-primary mb-1.5">
@@ -266,6 +332,7 @@ export function CaseDetailPage() {
   const { address: caseAddress } = useParams<{ address: string }>();
   const { address: walletAddress, isConnected } = useWallet();
   const { status, canRequestRuling, isLoading, error, refetch } = useCaseStatus(caseAddress ?? '');
+  const { config } = useHallConfig();
 
   if (!caseAddress) {
     return (
@@ -335,7 +402,11 @@ export function CaseDetailPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-4">
                   Case Lifecycle
                 </p>
-                <CaseTimeline currentStatus={status.status} />
+                <CaseTimeline
+                  currentStatus={status.status}
+                  wasRuled={status.ruled_at !== null}
+                  wasAppealed={status.appealed_at !== null}
+                />
               </div>
             </Card>
 
@@ -451,10 +522,22 @@ export function CaseDetailPage() {
                     <Scale className="w-4 h-4 text-secondary" />
                     Final Ruling
                     <Badge
-                      variant={status.final_ruling.violation ? 'suspended' : 'good'}
+                      variant={
+                        status.decided_by === 'withdrawn' || status.decided_by === 'expired_unruled'
+                          ? 'probation'
+                          : status.final_ruling.violation
+                            ? 'suspended'
+                            : 'good'
+                      }
                       size="sm"
                     >
-                      {status.final_ruling.violation ? 'Violation Upheld' : 'Complaint Dismissed'}
+                      {status.decided_by === 'withdrawn'
+                        ? 'Withdrawn'
+                        : status.decided_by === 'expired_unruled'
+                          ? 'Expired Unruled'
+                          : status.final_ruling.violation
+                            ? 'Violation Upheld'
+                            : 'Complaint Dismissed'}
                     </Badge>
                     {status.decided_by && (
                       <span className="ml-auto text-xs font-normal text-text-secondary">
@@ -489,6 +572,7 @@ export function CaseDetailPage() {
                 senderAddress={walletAddress}
                 canRequestRuling={canRequestRuling}
                 caseStatus={status}
+                appealWindowSeconds={config ? Number(config.appeal_window_seconds) : null}
                 onSuccess={refetch}
               />
             )}

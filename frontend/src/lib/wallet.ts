@@ -4,7 +4,7 @@
 // ============================================================
 
 import { studionet } from 'genlayer-js/chains';
-import type { EthereumProvider } from '../types';
+import type { EthereumProvider, EIP6963ProviderDetail } from '../types';
 
 declare global {
   interface Window {
@@ -20,13 +20,26 @@ const STUDIONET_CHAIN_PARAMS = {
   rpcUrls: [studionet.rpcUrls.default.http[0]],
 };
 
+// EIP-6963: wallets announce themselves; collect them as they do.
+const announced: EIP6963ProviderDetail[] = [];
+if (typeof window !== 'undefined') {
+  window.addEventListener('eip6963:announceProvider', (event) => {
+    const detail = (event as CustomEvent<EIP6963ProviderDetail>).detail;
+    if (detail?.provider && !announced.some((d) => d.info.uuid === detail.info.uuid)) {
+      announced.push(detail);
+    }
+  });
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+}
+
 /**
- * Returns the injected Ethereum provider.
- * Prefers EIP-6963 providers, falls back to window.ethereum.
+ * Returns the injected Ethereum provider. Prefers an EIP-6963 announced
+ * provider (MetaMask first), then window.ethereum.
  */
 export function getEthereumProvider(): EthereumProvider | null {
   if (typeof window === 'undefined') return null;
-  return window.ethereum ?? null;
+  const preferred = announced.find((d) => d.info.rdns === 'io.metamask') ?? announced[0];
+  return preferred?.provider ?? window.ethereum ?? null;
 }
 
 /** Request account access from the wallet */

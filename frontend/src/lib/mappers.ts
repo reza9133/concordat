@@ -38,6 +38,7 @@ export function mapStanding(raw: RawStanding): Standing {
     points: Number(raw.points ?? 0),
     status,
     dismissed_complaints: Number(raw.dismissed_filed ?? 0),
+    withdrawn_cases: Number(raw.withdrawn_filed ?? 0),
     open_cases: Number(raw.open_filed ?? 0),
   };
 }
@@ -49,11 +50,14 @@ export function mapStanding(raw: RawStanding): Standing {
 /**
  * Build a CaseRuling from the flat first-instance fields.
  * Returns null when the case has not been ruled yet (first_severity=0,
- * first_summary="" is ambiguous if violation=false, so we gate on status).
+ * first_summary="" is ambiguous if violation=false, so we gate on ruled_at).
+ *
+ * The status alone is not enough: a case that was withdrawn or expired
+ * unruled goes straight from "open" to "final" and never had a ruling.
+ * ruled_at is 0 until a ruling exists.
  */
 function buildFirstRuling(raw: RawCaseStatus): CaseRuling | null {
-  // Only available after the case has been ruled
-  if (raw.status === 'open') return null;
+  if (raw.status === 'open' || !(Number(raw.ruled_at ?? 0) > 0)) return null;
 
   return {
     violation: Boolean(raw.first_violation),

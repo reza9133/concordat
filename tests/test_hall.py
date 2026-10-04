@@ -235,3 +235,115 @@ def test_unsettled_cases_per_member_are_capped(hall, direct_vm, direct_alice, di
     _settle(hall, direct_vm, first, True, 1)  # settling frees a slot
     assert hall.get_standing(to_hex(direct_alice))["open_filed"] == 1
     _file(hall, direct_vm, direct_alice, direct_bob)
+
+
+def test_a_case_without_a_verdict_frees_the_complainants_slot(
+    hall, direct_vm, direct_alice, direct_bob
+):
+    first = _file(hall, direct_vm, direct_alice, direct_bob)
+    second = _file(hall, direct_vm, direct_alice, direct_bob)
+    with direct_vm.expect_revert("unsettled"):
+        _file(hall, direct_vm, direct_alice, direct_bob)  # at the cap of 2 open cases
+
+    with direct_vm.prank(from_hex(first)):
+        hall.report_withdrawn()
+    standing = hall.get_standing(to_hex(direct_alice))
+    assert standing["open_filed"] == 1 and standing["dismissed_filed"] == 0
+    assert standing["withdrawn_filed"] == 1
+    assert hall.get_case(first)["status"] == "withdrawn"
+    _file(hall, direct_vm, direct_alice, direct_bob)  # slot freed, one strike so far
+    assert second  # still open
+
+
+def test_filing_and_withdrawing_in_a_loop_ends_in_a_lockout(
+    hall, direct_vm, direct_owner, direct_alice, direct_bob
+):
+    # The fixture hall locks out at 2 strikes; a withdrawal is a strike.
+    for _ in range(2):
+        case_address = _file(hall, direct_vm, direct_alice, direct_bob)
+        with direct_vm.prank(from_hex(case_address)):
+            hall.report_withdrawn()
+    standing = hall.get_standing(to_hex(direct_alice))
+    assert standing["withdrawn_filed"] == 2 and standing["dismissed_filed"] == 0
+    assert standing["can_file"] is False
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("cannot file cases right now"):
+        hall.file_case(to_hex(direct_bob), 1, "https://example.org/complaint")
+    # Amnesty lifts it, whichever kind of strike it was.
+    direct_vm.sender = direct_owner
+    hall.forgive_dismissals(to_hex(direct_alice), 2)
+    standing = hall.get_standing(to_hex(direct_alice))
+    assert standing["withdrawn_filed"] == 0 and standing["can_file"] is True
+
+
+def test_report_withdrawn_is_authenticated_and_one_shot(hall, direct_vm, direct_alice, direct_bob):
+    case_address = _file(hall, direct_vm, direct_alice, direct_bob)
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("unknown case"):
+        hall.report_withdrawn()
+    with direct_vm.prank(from_hex(case_address)):
+        hall.report_withdrawn()
+        with direct_vm.expect_revert("already been settled"):
+            hall.report_withdrawn()
+        with direct_vm.expect_revert("already been settled"):
+            hall.report_final(True, 2)
+
+
+def test_forgive_dismissals_lifts_the_filing_lockout(
+    hall, direct_vm, direct_alice, direct_bob, direct_owner
+):
+    for _ in range(2):
+        case_address = _file(hall, direct_vm, direct_alice, direct_bob)
+        _settle(hall, direct_vm, case_address, False, 0)
+    assert hall.get_standing(to_hex(direct_alice))["dismissed_filed"] == 2
+    with direct_vm.expect_revert("too many dismissed complaints"):
+        _file(hall, direct_vm, direct_alice, direct_bob)
+
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("owner"):
+        hall.forgive_dismissals(to_hex(direct_alice), 1)
+    direct_vm.sender = direct_owner
+    with direct_vm.expect_revert("must not be negative"):
+        hall.forgive_dismissals(to_hex(direct_alice), -1)
+    hall.forgive_dismissals(to_hex(direct_alice), 1)
+    assert hall.get_standing(to_hex(direct_alice))["dismissed_filed"] == 1
+    hall.forgive_dismissals(to_hex(direct_alice), 100)  # never below zero
+    assert hall.get_standing(to_hex(direct_alice))["dismissed_filed"] == 0
+    _file(hall, direct_vm, direct_alice, direct_bob)
+
+
+def test_file_case_refuses_urls_that_encode_an_internal_address(hall, direct_vm, direct_alice, direct_bob):
+    direct_vm.sender = direct_alice
+    for bad in (
+        "http://127.0.0.1.nip.io/x",
+        "http://10-0-0-1.sslip.io/x",
+        "http://10-0-0-1.example.org/x",
+        "http://ip-10-0-0-1.example.org/x",
+        "http://ec2-10-0-0-1.compute.example.com/x",
+        "http://169.254.169.254.example.org/x",
+        "http://example.org:8080/x",
+        "http://[::1]/x",
+        "http://2130706433/x",
+        "http://example.org\\@127.0.0.1/",
+    ):
+        with direct_vm.expect_revert("[EXPECTED]"):
+            hall.file_case(to_hex(direct_bob), 1, bad)
+    assert hall.get_case_count() == 0
+
+
+@pytest.mark.parametrize(
+    "good",
+    [
+        "https://my-1-2-3-4-app.vercel.app/complaint",
+        "https://v1-2-3-4.example.org/complaint",
+        "https://site-300-1-2-3.example.org/complaint",
+        "https://example.org/1.2.3.4",  # digits in the path are irrelevant
+    ],
+)
+def test_file_case_accepts_ordinary_names_that_only_contain_digits(
+    hall, direct_vm, direct_alice, direct_bob, good
+):
+    # Regression: a name with four numbers inside a longer label is not an IP.
+    direct_vm.sender = direct_alice
+    hall.file_case(to_hex(direct_bob), 1, good)
+    assert hall.get_case_count() == 1

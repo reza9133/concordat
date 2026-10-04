@@ -11,7 +11,7 @@ import type { Rule } from '../../types';
 interface FileCaseFormProps {
   senderAddress: string;
   rules: Rule[];
-  onSuccess?: (txHash: string) => void;
+  onSuccess?: (txHash: string, caseAddress: string | null) => void;
   onError?: (message: string) => void;
 }
 
@@ -35,7 +35,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
     if (!ruleNumber) {
       newErrors.ruleNumber = 'Please select a rule that was violated';
     }
-    if (!complaintUrl || (!complaintUrl.startsWith('http://') && !complaintUrl.startsWith('https://')) || /^https?:\/\/(localhost|\[|\d+(\.|\/|:|$))/i.test(complaintUrl)) {
+    if (!complaintUrl || (!complaintUrl.startsWith('http://') && !complaintUrl.startsWith('https://')) || /^https?:\/\/(localhost|\[|\d+(\.\d+){0,3}(\/|:|\?|#|$))/i.test(complaintUrl)) {
       newErrors.complaintUrl = 'Enter a valid URL (http:// or https://)';
     }
     setErrors(newErrors);
@@ -48,7 +48,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
 
     setIsSubmitting(true);
     try {
-      const txHash = await writeFileCase(
+      const { txHash, caseAddress } = await writeFileCase(
         senderAddress as `0x${string}`,
         accused,
         parseInt(ruleNumber),
@@ -58,7 +58,7 @@ export function FileCaseForm({ senderAddress, rules, onSuccess, onError }: FileC
       setRuleNumber('');
       setComplaintUrl('');
       setErrors({});
-      onSuccess?.(txHash);
+      onSuccess?.(txHash, caseAddress);
     } catch (err) {
       const msg = getErrorMessage(err);
       onError?.(msg);
