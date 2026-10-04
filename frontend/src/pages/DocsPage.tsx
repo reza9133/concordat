@@ -99,7 +99,7 @@ const SECTIONS: DocSection[] = [
         <ul className="space-y-2 text-text-secondary">
           <li className="flex gap-2"><ChevronRight className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" /><span><strong className="text-text-primary">ConcordatHall</strong> — The main registry. Holds config, rulebook, and member standings.</span></li>
           <li className="flex gap-2"><ChevronRight className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" /><span><strong className="text-text-primary">ConcordatCase</strong> — Created per dispute. Manages defense, AI ruling, and appeal window.</span></li>
-          <li className="flex gap-2"><ChevronRight className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" /><span><strong className="text-text-primary">ConcordatAppeal</strong> — Created on appeal. Runs a fresh AI review with appeal context.</span></li>
+          <li className="flex gap-2"><ChevronRight className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" /><span><strong className="text-text-primary">ConcordatAppeal</strong> — Created on appeal. Reviews the first ruling with deference: it stands unless the grounds and the stored evidence clearly show a mistake.</span></li>
         </ul>
       </div>
     ),
@@ -114,10 +114,10 @@ const SECTIONS: DocSection[] = [
         </p>
         {[
           { n: 1, title: 'File a Case', text: 'Any member calls file_case(accused, rule_number, complaint_url). A new ConcordatCase contract is deployed and the defense window begins.' },
-          { n: 2, title: 'Submit Defense', text: 'The accused has until defense_deadline to call submit_defense(url) with a URL linking to their counter-argument document.' },
+          { n: 2, title: 'Submit Defense', text: 'The accused has until the end of the defense window (defense_closes_at in get_status) to call submit_defense(url) with a URL linking to their counter-argument document.' },
           { n: 3, title: 'Request Ruling', text: 'After the defense window closes (or if a defense was submitted), anyone can call request_ruling(). The GenLayer AI validators read both URLs and reach consensus.' },
-          { n: 4, title: 'Ruling Delivered', text: 'The AI returns a verdict (sustained/dismissed), reasoning, and penalty_points. If sustained, the accused\'s standing is updated.' },
-          { n: 5, title: 'Appeal Window', text: 'The losing party has appeal_window_seconds to call appeal(grounds_url). This creates a ConcordatAppeal contract for a fresh review.' },
+          { n: 4, title: 'Ruling Delivered', text: 'The AI returns a verdict (violation yes/no), a severity from 0 to 3, and reasoning. Once the case is final, an upheld violation adds the severity as penalty points to the accused\'s standing.' },
+          { n: 5, title: 'Appeal Window', text: 'The losing party has appeal_window_seconds to call appeal(grounds_url). This creates a ConcordatAppeal contract; anyone then calls its review() once.' },
           { n: 6, title: 'Finalize', text: 'If nobody appeals, anyone calls finalize() after the appeal window to close the case and commit the outcome to the hall\'s state. An appealed case is closed by the appeal result instead, with no finalize() call.' },
         ].map((step) => (
           <div key={step.n} className="flex gap-4 mb-5">
@@ -151,7 +151,7 @@ const SECTIONS: DocSection[] = [
           rows={[
             ['get_config()', 'HallConfig', 'Returns hall configuration dict'],
             ['get_rules()', 'Rule[]', 'Returns all rules (active and retired)'],
-            ['get_standing(address)', 'Standing', 'Returns member standing (points, status, dismissed_complaints)'],
+            ['get_standing(address)', 'Standing', 'Returns member standing (points, label, dismissed_filed, withdrawn_filed, open_filed, can_file)'],
             ['get_case(case_addr)', 'CaseEntry', 'Returns case registry entry'],
             ['get_cases(offset, limit)', 'address[]', 'Paginated list of case addresses'],
             ['get_case_count()', 'int', 'Total number of cases filed'],
@@ -164,6 +164,7 @@ const SECTIONS: DocSection[] = [
             ['add_rule(title, text)', 'Owner', 'Adds a new rule to the rulebook'],
             ['retire_rule(rule_number)', 'Owner', 'Marks a rule as retired (inactive)'],
             ['forgive_points(member, points)', 'Owner', 'Removes penalty points from a member'],
+            ['forgive_dismissals(member, count)', 'Owner', 'Lowers a member\'s strike count (dismissed, then withdrawn/expired) to lift the filing lockout'],
             ['file_case(accused, rule_number, url)', 'Anyone', 'Files a new dispute case, returns case address'],
           ]}
         />
@@ -183,10 +184,10 @@ const SECTIONS: DocSection[] = [
           headers={['Method', 'Access', 'Description']}
           rows={[
             ['submit_defense(url)', 'Accused', 'Submits defense URL within defense window'],
-            ['request_ruling()', 'Anyone', 'Triggers AI adjudication after defense window'],
+            ['request_ruling()', 'Anyone', 'Triggers AI adjudication once a defense exists or the defense window has closed'],
             ['appeal(grounds_url)', 'Losing Party', 'Files appeal within appeal window'],
             ['finalize()', 'Anyone', 'Closes case after appeal window expires'],
-            ['abandon_appeal()', 'Anyone', 'Drops a stuck appeal'],
+            ['abandon_appeal()', 'Anyone', 'Closes a stuck appeal with the first ruling, once its review window has passed and the review has no result'],
             ['withdraw()', 'Complainant', 'Drops an unruled case while the defense window is open and the accused has not answered; no verdict'],
             ['expire()', 'Complainant', 'Closes a case still unruled after both windows; no verdict'],
           ]}
@@ -213,7 +214,7 @@ const SECTIONS: DocSection[] = [
           <li className="flex gap-2"><ChevronRight className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" /><span><strong className="text-text-primary">Complaint URL</strong> — A publicly accessible link to your complaint/evidence document</span></li>
         </ul>
         <div className="p-4 bg-accent/10 border border-accent/20 rounded-xl text-sm text-amber-700">
-          <strong>Warning:</strong> Filing false or malicious complaints may result in your own standing being penalized. If too many of your complaints are dismissed (max_dismissed_complaints), the system will penalize your standing.
+          <strong>Warning:</strong> Filing false or malicious complaints may result in your own standing being penalized. Once your dismissed, withdrawn and expired cases reach max_dismissed_complaints, you can no longer file cases, and you can have at most that many unsettled cases open at once.
         </div>
         <CodeBlock>{`// Contract call
 file_case(
@@ -267,11 +268,12 @@ appeal(
   grounds_url: "https://..."  // Link to appeal grounds document
 )
 // Creates ConcordatAppeal contract
-// Fresh AI review with appeal context`}</CodeBlock>
+// Review with deference to the first ruling`}</CodeBlock>
         <p className="text-text-secondary text-sm leading-relaxed mt-4">
-          The appeal grounds URL should explain why the original ruling was incorrect. The AI will review
-          the original complaint, original defense, the first ruling, and your appeal grounds to reach
-          a final decision.
+          The appeal grounds URL should explain why the original ruling was incorrect. The AI reviews
+          the stored complaint and defense evidence, the first ruling, and your appeal grounds. The first
+          ruling stands unless the grounds clearly show a mistake. If the grounds page cannot be read, the
+          first ruling stands.
         </p>
       </div>
     ),
@@ -298,11 +300,11 @@ appeal(
           <code className="font-mono text-primary bg-primary/5 px-1.5 py-0.5 rounded text-xs">
             forgive_points(member, points)
           </code>{' '}
-          if rehabilitation is warranted. Dismissed complaints count toward{' '}
+          if rehabilitation is warranted. Dismissed, withdrawn and expired cases count as strikes toward{' '}
           <code className="font-mono text-primary bg-primary/5 px-1.5 py-0.5 rounded text-xs">
             max_dismissed_complaints
           </code>{' '}
-          — too many dismissed complaints penalize the complainant instead.
+          — too many strikes lock the complainant out of filing. The owner can lift the lockout with forgive_dismissals.
         </p>
       </div>
     ),
@@ -318,7 +320,7 @@ appeal(
         {[
           {
             title: 'Dead Link Protection',
-            text: 'The AI is instructed to treat inaccessible URLs as if no document was submitted. This prevents defending through link rot and ensures both parties can always verify the evidence.',
+            text: 'An unreachable defense or appeal-grounds page is treated as not provided, so a dead link cannot freeze a case. An unreadable complaint page makes the ruling fail until it is readable; the complainant can close such a case with expire().',
           },
           {
             title: 'Prompt Injection Protection',
@@ -357,11 +359,11 @@ appeal(
           },
           {
             q: 'What if my complaint URL goes dead?',
-            a: 'The AI treats dead/inaccessible URLs as if no document was submitted. It\'s your responsibility to ensure your complaint URL remains accessible throughout the case lifecycle.',
+            a: 'If the complaint page cannot be read, the ruling fails and can be retried later, and the complainant can close the case with expire() once both windows have passed. A dead defense link is treated as no defense. Prefer a stable page (an archive copy or a fixed revision).',
           },
           {
             q: 'Can the same person file multiple cases against one member?',
-            a: 'Yes, but if too many of your cases against a member are dismissed (exceeding max_dismissed_complaints), the system treats it as harassment and penalizes your own standing.',
+            a: 'Yes, but you can only have max_dismissed_complaints unsettled cases open at once, and once your dismissed, withdrawn and expired cases reach that number you are locked out of filing until the owner lifts it.',
           },
           {
             q: 'How long does an AI ruling take?',
@@ -373,7 +375,7 @@ appeal(
           },
           {
             q: 'Can the hall owner override a ruling?',
-            a: 'No. The hall owner can only forgive penalty points after the fact — they cannot reverse or alter a ruling itself. This ensures rulings are truly AI-powered and neutral.',
+            a: 'No. The hall owner can only forgive penalty points or strikes after the fact — they cannot reverse or alter a ruling itself. This ensures rulings are truly AI-powered and neutral.',
           },
         ].map(({ q, a }) => (
           <div key={q} className="border border-border rounded-xl overflow-hidden">

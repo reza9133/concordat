@@ -199,7 +199,7 @@ export function StandingsPage() {
                   )}
 
                   {/* Stats */}
-                  <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
                     <div className="text-center p-3 rounded-xl bg-background border border-border">
                       <div className="text-2xl font-bold text-text-primary">{standing.points}</div>
                       <div className="text-xs text-text-secondary mt-0.5">Penalty Points</div>
@@ -209,6 +209,16 @@ export function StandingsPage() {
                         {standing.dismissed_complaints}
                       </div>
                       <div className="text-xs text-text-secondary mt-0.5">Dismissed Complaints</div>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-background border border-border">
+                      <div className="text-2xl font-bold text-text-primary">
+                        {standing.withdrawn_cases}
+                      </div>
+                      <div className="text-xs text-text-secondary mt-0.5">Withdrawn / Expired</div>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-background border border-border">
+                      <div className="text-2xl font-bold text-text-primary">{standing.open_cases}</div>
+                      <div className="text-xs text-text-secondary mt-0.5">Open Cases</div>
                     </div>
                   </div>
                 </div>
@@ -259,14 +269,14 @@ export function StandingsPage() {
                 </CardHeader>
                 <CardBody>
                   <p className="text-sm text-text-secondary mb-3">
-                    Lowers the dismissed-complaint count, which lifts the filing lockout. Forgiving
-                    points does not do this.
+                    Lowers the strike count (dismissed complaints first, then withdrawn or expired
+                    cases), which lifts the filing lockout. Forgiving points does not do this.
                   </p>
                   <div className="flex gap-2">
                     <input
                       type="number"
                       min={1}
-                      max={standing.dismissed_complaints}
+                      max={standing.dismissed_complaints + standing.withdrawn_cases}
                       value={dismissalAmount}
                       onChange={(e) => setDismissalAmount(e.target.value)}
                       placeholder="Dismissals to forgive"

@@ -41,7 +41,7 @@ function NotConnectedBanner({ onConnect }: { onConnect: () => void }) {
 }
 
 export function AppPage() {
-  const { address, isConnected, isConnecting, connect } = useWallet();
+  const { address, isConnected, isConnecting, openModal } = useWallet();
   const { config, isLoading: configLoading, error: configError } = useHallConfig();
   const { rules } = useRules();
   const {
@@ -123,7 +123,7 @@ export function AppPage() {
             {/* Wallet section on mobile */}
             {!isConnected && (
               <Card>
-                <NotConnectedBanner onConnect={connect} />
+                <NotConnectedBanner onConnect={openModal} />
               </Card>
             )}
           </div>
@@ -208,7 +208,7 @@ export function AppPage() {
             {activeTab === 'file' && (
               <Card>
                 {!isConnected ? (
-                  <NotConnectedBanner onConnect={connect} />
+                  <NotConnectedBanner onConnect={openModal} />
                 ) : isConnecting ? null : (
                   <div>
                     <div className="flex items-center gap-3 mb-6">

@@ -75,7 +75,7 @@ const STEPS = [
     details: [
       'Accused calls submit_defense(url)',
       'Defense URL is recorded on-chain',
-      'Window closes after configured time',
+      'Window closes after configured time (the complainant can withdraw only before an answer)',
       'No defense = AI rules on complaint alone',
     ],
     gradient: 'from-green-500 to-secondary',
@@ -89,7 +89,7 @@ const STEPS = [
     title: 'AI Ruling',
     tagline: 'Impartial AI consensus',
     description:
-      'After the defense window closes, anyone can trigger the AI ruling via request_ruling(). GenLayer\'s validators read the complaint and defense URLs, analyze the content against the rule, and reach consensus on a verdict with penalty points.',
+      'Once the accused has submitted a defense, or the defense window has closed, anyone can trigger the AI ruling via request_ruling(). GenLayer\'s validators read the complaint and defense URLs, analyze the content against the rule, and reach consensus on a verdict with penalty points.',
     details: [
       'Anyone calls request_ruling()',
       'Multiple AI validators analyze the case',
@@ -107,11 +107,11 @@ const STEPS = [
     title: 'Appeal',
     tagline: 'Challenge the ruling',
     description:
-      'The losing party has an appeal window to challenge the ruling by submitting grounds for appeal. This triggers a new appeal contract (ConcordatAppeal) where the AI reviews both parties\' arguments again with fresh context.',
+      'The losing party has an appeal window to challenge the ruling by submitting grounds for appeal. This triggers a new appeal contract (ConcordatAppeal) where the AI reviews the first ruling against the stored evidence and the appellant\'s grounds. The first ruling stands unless the grounds clearly show a mistake. Anyone then triggers the review with review().',
     details: [
       'Losing party calls appeal(grounds_url)',
       'New ConcordatAppeal contract is created',
-      'AI reviews case fresh with appeal context',
+      'Deference standard: the first ruling stands unless clearly mistaken',
       'Only one appeal per case allowed',
     ],
     gradient: 'from-orange-500 to-amber-500',

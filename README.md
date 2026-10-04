@@ -214,7 +214,7 @@ Notes:
   role is enforced on-chain.
 - Evidence URLs must be plain, public pages that name a domain on the default
   http(s) port (no IP addresses, `localhost`, intranet or `.local`/`.internal`
-  hosts, names that embed an IP such as `127.0.0.1.nip.io` or
+  hosts, percent-encoded host names such as `127.0.0.%31`, names that embed an IP such as `127.0.0.1.nip.io` or
   `10-0-0-1.example.org`, or embedded credentials; a name that merely contains
   digits, such as `my-1-2-3-4-app.vercel.app`, is fine) and that validators can fetch. This is a first filter only: a
   contract cannot resolve DNS, so the validators' web module stays the final
@@ -248,7 +248,7 @@ case and appeal contract by its address to call its methods the same way.
 | `add_rule(title, text)` | owner | Add a rule, returns its number |
 | `retire_rule(rule_number)` | owner | Stop accepting new cases for a rule |
 | `forgive_points(member, points)` | owner | Amnesty (points must be >= 0), never below zero |
-| `forgive_dismissals(member, count)` | owner | Lower a member's dismissed-complaint count (count >= 0), never below zero |
+| `forgive_dismissals(member, count)` | owner | Lower a member's strikes (count >= 0): dismissed complaints first, then withdrawn/expired cases; never below zero |
 | `file_case(accused, rule_number, complaint_url)` | anyone allowed to file | Deploys a case, returns its address |
 | `report_final(violation, severity)` | cases only | Settles a case and updates standings |
 | `report_withdrawn()` | cases only | Frees the complainant's slot for a case that ended without a verdict |

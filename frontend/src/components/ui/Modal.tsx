@@ -3,6 +3,7 @@
 // ============================================================
 
 import { ReactNode, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -10,6 +11,8 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /** Optional sub-heading under the title */
+  description?: string;
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
@@ -27,6 +30,7 @@ export function Modal({
   isOpen,
   onClose,
   title,
+  description,
   children,
   footer,
   size = 'md',
@@ -51,7 +55,13 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
 
-  return (
+  // Rendered through a portal into <body>: the sticky navbar uses
+  // backdrop-filter, which makes it the containing block for any
+  // `position: fixed` child — a modal opened from the navbar would be
+  // clipped to the header instead of covering the screen.
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -74,7 +84,7 @@ export function Modal({
             className={`
               relative w-full ${SIZE_MAP[size]}
               bg-white rounded-2xl shadow-glass-hover border border-border
-              overflow-hidden z-10
+              max-h-[90vh] overflow-y-auto z-10
             `}
             role="dialog"
             aria-modal="true"
@@ -83,9 +93,14 @@ export function Modal({
             {/* Header */}
             {title && (
               <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-                <h2 id="modal-title" className="text-lg font-semibold text-text-primary">
-                  {title}
-                </h2>
+                <div className="min-w-0 pr-2">
+                  <h2 id="modal-title" className="text-lg font-semibold text-text-primary">
+                    {title}
+                  </h2>
+                  {description && (
+                    <p className="mt-0.5 text-sm text-text-secondary">{description}</p>
+                  )}
+                </div>
                 <button
                   onClick={onClose}
                   className="p-1.5 rounded-lg hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
@@ -106,6 +121,7 @@ export function Modal({
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

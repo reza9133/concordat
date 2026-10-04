@@ -28,7 +28,7 @@ A modern, multi-page React + TypeScript dApp for the **Concordat** intelligent c
 | `/app` | Main dApp dashboard — connect wallet, browse and file cases |
 | `/cases/:address` | Case detail — status, rulings, appeals, actions |
 | `/rulebook` | Browse all rules; owner can add/retire rules |
-| `/standings` | Look up any member's reputation standing |
+| `/standings` | Look up any member's standing: points, dismissed, withdrawn/expired and open cases; owner can forgive points and strikes |
 | `/docs` | Full documentation with sidebar navigation |
 | `/how-it-works` | Animated step-by-step guide |
 
@@ -43,7 +43,7 @@ npm run dev
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` (already pre-filled):
+Copy `.env.example` to `.env` (the example is pre-filled with the current hall address):
 
 ```
 VITE_CONTRACT_ADDRESS=0x5E3B347016A53FF1a79A7B16e9Bde1CB840fae3E
@@ -99,7 +99,7 @@ frontend/
 
 ## Wallet Support
 
-The app uses **EIP-6963** wallet discovery for broad wallet support (MetaMask, Rabby, etc.) with automatic fallback to `window.ethereum`. Write operations require:
+The app uses **EIP-6963** wallet discovery (MetaMask is preferred when several wallets announce themselves) with automatic fallback to `window.ethereum`. Write operations require:
 1. A connected wallet
 2. The wallet must be on **GenLayer Studionet** (the app prompts to switch automatically)
 
