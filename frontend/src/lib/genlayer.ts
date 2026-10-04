@@ -109,7 +109,14 @@ export function describeFailure(tx: unknown): string | null {
   }
   const consensus = (t.consensus_data ?? null) as Loose | null;
   const raw = consensus?.leader_receipt;
-  const receipts = (Array.isArray(raw) ? raw : raw ? [raw] : []) as Loose[];
+  // A validator whose run was cut short because quorum was already reached
+  // reports an error ("Validator execution cancelled after quorum"). That is
+  // the network finishing early, not the contract rejecting the action.
+  const isCancelledAfterQuorum = (r: Loose) =>
+    /cancelled after quorum/i.test(JSON.stringify(r.genvm_result ?? '') + String(r.execution_result ?? ''));
+  const receipts = ((Array.isArray(raw) ? raw : raw ? [raw] : []) as Loose[]).filter(
+    (r) => !isCancelledAfterQuorum(r),
+  );
   const failed =
     t.txExecutionResultName === 'FINISHED_WITH_ERROR' ||
     receipts.some((r) => String(r.execution_result ?? '').toUpperCase().includes('ERROR'));
